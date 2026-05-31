@@ -1,0 +1,51 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Basic helpers
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return request.auth.uid == userId; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidString(val, maxLen) { return val is string && val.size() <= maxLen; }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn(); // Other agents can see basic details
+      allow write: if isSignedIn() && isOwner(userId);
+    }
+    
+    // Properties collection
+    match /properties/{propertyId} {
+      allow read: if true; // Public can see properties
+      allow create: if isSignedIn() && incoming().agentId == request.auth.uid;
+      allow update, delete: if isSignedIn() && existing().agentId == request.auth.uid;
+    }
+
+    // Clients collection
+    match /clients/{clientId} {
+      allow read: if isSignedIn() && existing().agentId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().agentId == request.auth.uid;
+      allow update, delete: if isSignedIn() && existing().agentId == request.auth.uid;
+    }
+
+    // Appointments collection
+    match /appointments/{appointmentId} {
+      allow read: if isSignedIn() && existing().agentId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().agentId == request.auth.uid;
+      allow update, delete: if isSignedIn() && existing().agentId == request.auth.uid;
+    }
+
+    // DocumentTemplates collection
+    match /documentTemplates/{templateId} {
+      allow read: if isSignedIn() && existing().agentId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().agentId == request.auth.uid;
+      allow update, delete: if isSignedIn() && existing().agentId == request.auth.uid;
+    }
+    
+    // Safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

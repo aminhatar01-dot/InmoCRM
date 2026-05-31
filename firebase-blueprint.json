@@ -1,0 +1,104 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Agent/User profile",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email"]
+    },
+    "Property": {
+      "title": "Property",
+      "description": "Real estate property",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "currency": { "type": "string" },
+        "address": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "status": { "type": "string", "enum": ["disponible", "reservada", "vendida", "alquilada"] },
+        "type": { "type": "string", "enum": ["casa", "departamento", "terreno", "local", "oficina"] },
+        "agentId": { "type": "string" },
+        "bedrooms": { "type": "number" },
+        "bathrooms": { "type": "number" },
+        "areaSqM": { "type": "number" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "price", "agentId", "status", "type"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Customer/Lead",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "type": { "type": "string", "enum": ["lead", "cliente"] },
+        "status": { "type": "string", "enum": ["nuevo", "contactado", "negociacion", "convertido", "perdido"] },
+        "agentId": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "agentId", "type"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Meeting or viewing appointment",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "agentId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pendiente", "completada", "cancelada"] },
+        "notes": { "type": "string" }
+      },
+      "required": ["agentId", "date", "status"]
+    },
+    "DocumentTemplate": {
+      "title": "Document Template",
+      "description": "Template for legal documents",
+      "type": "object",
+      "properties": {
+        "agentId": { "type": "string" },
+        "name": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["agentId", "name", "content"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Agent profiles"
+    },
+    "/properties/{propertyId}": {
+      "schema": { "$ref": "#/entities/Property" },
+      "description": "Real estate properties managed by agents"
+    },
+    "/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Clients and leads assigned to agents"
+    },
+    "/appointments/{appointmentId}": {
+      "schema": { "$ref": "#/entities/Appointment" },
+      "description": "Appointments for property viewings or meetings"
+    },
+    "/documentTemplates/{templateId}": {
+      "schema": { "$ref": "#/entities/DocumentTemplate" },
+      "description": "Document templates for contracts"
+    }
+  }
+}
