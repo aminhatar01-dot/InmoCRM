@@ -86,11 +86,9 @@ export function Properties() {
         </div>
         
         <Dialog open={addingProperty} onOpenChange={setAddingProperty}>
-          <DialogTrigger asChild>
-            <Button className="bg-blue-600 hover:bg-blue-700">
-              <Plus className="w-4 h-4 mr-2" />
-              Nueva Propiedad
-            </Button>
+          <DialogTrigger render={<Button className="bg-blue-600 hover:bg-blue-700" />}>
+            <Plus className="w-4 h-4 mr-2" />
+            Nueva Propiedad
           </DialogTrigger>
           <DialogContent className="sm:max-w-[600px] overflow-y-auto max-h-[90vh]">
             <DialogHeader>
