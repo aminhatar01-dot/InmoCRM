@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Copy, Bot, Send, User, Reply, Search, FileText, MessageSquare } from "lucide-react";
+import { Copy, Bot, Send, User, Reply, Search, FileText, MessageSquare, BotOff } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 
@@ -22,6 +22,7 @@ interface Chat {
   lastMessage: string;
   lastMessageAt: Date;
   messages: Message[];
+  aiPaused?: boolean;
 }
 
 export function Inbox() {
@@ -63,6 +64,7 @@ export function Inbox() {
           phone: "+54 9 11 1234-5678",
           lastMessage: "¡Excelente! Me gustaría agendar una visita.",
           lastMessageAt: new Date(Date.now() - 1000 * 60 * 5),
+          aiPaused: false,
           messages: [
             { id: "m1", text: "Hola, vi la casa en Palermo, ¿sigue disponible?", sender: "user", timestamp: new Date(Date.now() - 1000 * 60 * 60) },
             { id: "m2", text: "¡Hola María! Sí, sigue disponible. Tiene 3 habitaciones y un patio amplio. ¿Te gustaría saber el precio o más detalles?", sender: "ai", timestamp: new Date(Date.now() - 1000 * 60 * 55) },
@@ -77,6 +79,7 @@ export function Inbox() {
           phone: "+54 9 11 9876-5432",
           lastMessage: "¿Aceptan mascotas?",
           lastMessageAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
+          aiPaused: false,
           messages: [
             { id: "m1", text: "Me interesa el departamento de Belgrano.", sender: "user", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 3) },
             { id: "m2", text: "¡Hola Carlos! Es una excelente opción. ¿Qué información te gustaría saber?", sender: "ai", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2.5) },
@@ -88,6 +91,18 @@ export function Inbox() {
     }
     loadData();
   }, [user]);
+
+  const toggleAiStatus = (chatId: string) => {
+    setChats(chats.map(chat => {
+      if (chat.id === chatId) {
+        return {
+          ...chat,
+          aiPaused: !chat.aiPaused
+        };
+      }
+      return chat;
+    }));
+  };
 
   const handleSendMessage = () => {
     if (!messageText.trim() || !activeChat) return;
@@ -101,7 +116,8 @@ export function Inbox() {
             { id: Date.now().toString(), text: messageText, sender: "agent", timestamp: new Date() }
           ],
           lastMessage: messageText,
-          lastMessageAt: new Date()
+          lastMessageAt: new Date(),
+          aiPaused: true // automatically pause AI when human agent intervenes
         };
       }
       return chat;
@@ -155,26 +171,49 @@ export function Inbox() {
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 truncate mb-1">{chat.phone}</p>
-                <p className="text-sm text-slate-600 truncate">{chat.lastMessage}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Chat Area */}
-        {currentChat ? (
-          <div className="flex-1 flex flex-col bg-white">
-            {/* Header */}
-            <div className="p-4 border-b flex items-center justify-between bg-white">
-              <div>
-                <h3 className="font-bold text-lg text-slate-900">{currentChat.clientName}</h3>
-                <p className="text-sm text-slate-500">{currentChat.phone}</p>
-              </div>
-              <Button variant="outline" size="sm" className="hidden sm:flex">
-                <FileText className="w-4 h-4 mr-2" />
-                Ver Lead Info
-              </Button>
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-sm text-slate-600 truncate">{chat.lastMessage}</p>
+                    {aiEnabled && chat.aiPaused && (
+                      <span className="shrink-0 bg-red-100 text-red-600 rounded-full p-1 ml-2" title="IA Pausada">
+                        <BotOff className="w-3 h-3" />
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
+          </div>
+  
+          {/* Chat Area */}
+          {currentChat ? (
+            <div className="flex-1 flex flex-col bg-white">
+              {/* Header */}
+              <div className="p-4 border-b flex items-center justify-between bg-white">
+                <div>
+                  <h3 className="font-bold text-lg text-slate-900">{currentChat.clientName}</h3>
+                  <p className="text-sm text-slate-500">{currentChat.phone}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {aiEnabled && (
+                    <Button 
+                      variant={currentChat.aiPaused ? "default" : "outline"}
+                      size="sm" 
+                      onClick={() => toggleAiStatus(currentChat.id)}
+                      className={currentChat.aiPaused ? 'bg-red-600 hover:bg-red-700' : 'text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100'}
+                    >
+                      {currentChat.aiPaused ? (
+                        <><BotOff className="w-4 h-4 mr-2" /> IA Intervenida</>
+                      ) : (
+                        <><Bot className="w-4 h-4 mr-2" /> IA Respondiendo</>
+                      )}
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" className="hidden sm:flex">
+                    <FileText className="w-4 h-4 mr-2" />
+                    Ver Lead Info
+                  </Button>
+                </div>
+              </div>
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/30">

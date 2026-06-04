@@ -12,6 +12,7 @@ import { Appointments } from "./pages/Appointments";
 import { Settings } from "./pages/Settings";
 import { Login } from "./pages/Login";
 import { Portfolio } from "./pages/Portfolio";
+import { PropertyDetail } from "./pages/PropertyDetail";
 import { Inbox } from "./pages/Inbox";
 import { AuthProvider } from "@/lib/AuthContext";
 
@@ -22,6 +23,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/portfolio/:agentId" element={<Portfolio />} />
+          <Route path="/property/:propertyId" element={<PropertyDetail />} />
           
           <Route element={<ProtectedRoute />}>
             <Route element={<DashboardLayout />}>

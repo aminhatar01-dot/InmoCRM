@@ -1,100 +1,125 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Search, MapPin } from "lucide-react";
+import { Plus, Search, MapPin, Share2, Edit2, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary } from '@vis.gl/react-google-maps';
+import { Textarea } from "@/components/ui/textarea";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, getDocs, onSnapshot, query, where } from "firebase/firestore";
+import { collection, addDoc, getDocs, onSnapshot, query, where, updateDoc, doc } from "firebase/firestore";
 import { useAuth } from "@/lib/AuthContext";
 import { Property, PropertyStatus, PropertyType } from "@/src/types";
 
-const API_KEY =
-  process.env.GOOGLE_MAPS_PLATFORM_KEY ||
-  (globalThis as any).GOOGLE_MAPS_PLATFORM_KEY ||
-  '';
-const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
+function PropertyForm({ isOpen, setIsOpen, onSave, initialData }: any) {
+  const [title, setTitle] = useState(initialData?.title || "");
+  const [description, setDescription] = useState(initialData?.description || "");
+  const [price, setPrice] = useState(initialData?.price || "");
+  const [address, setAddress] = useState(initialData?.address || "");
+  const [city, setCity] = useState(initialData?.city || "");
+  const [type, setType] = useState(initialData?.type || "casa");
+  const [bedrooms, setBedrooms] = useState(initialData?.bedrooms || "");
+  const [bathrooms, setBathrooms] = useState(initialData?.bathrooms || "");
+  const [areaSqM, setAreaSqM] = useState(initialData?.areaSqM || "");
 
-function AddPropertyForm({ addingProperty, setAddingProperty, onSave }: any) {
-  const [title, setTitle] = useState("");
-  const [price, setPrice] = useState("");
-  const [address, setAddress] = useState("");
-  const [selPos, setSelPos] = useState({ lat: -34.588, lng: -58.431 });
+  const handleSaveData = async () => {
+    let lat = initialData?.lat || 0;
+    let lng = initialData?.lng || 0;
 
-  const inputRef = useRef<HTMLInputElement>(null);
-  const placesLib = useMapsLibrary('places');
-
-  useEffect(() => {
-    if (!placesLib || !inputRef.current) return;
-
-    const autocomplete = new placesLib.Autocomplete(inputRef.current, {
-      fields: ['formatted_address', 'geometry', 'name'],
-    });
-
-    autocomplete.addListener('place_changed', () => {
-      const place = autocomplete.getPlace();
-      if (!place.geometry || !place.geometry.location) {
-        return;
+    if (address || city) {
+      try {
+        const q = encodeURIComponent(`${address}, ${city}`);
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}`);
+        const data = await res.json();
+        if (data && data.length > 0) {
+          lat = parseFloat(data[0].lat);
+          lng = parseFloat(data[0].lon);
+        }
+      } catch (e) {
+        console.error("Geocoding failed", e);
       }
-      setAddress(place.formatted_address || place.name || "");
-      setSelPos({
-        lat: place.geometry.location.lat(),
-        lng: place.geometry.location.lng()
-      });
+    }
+
+    onSave({ 
+      title, 
+      description,
+      price: Number(price), 
+      address, 
+      city, 
+      type,
+      bedrooms: Number(bedrooms),
+      bathrooms: Number(bathrooms),
+      areaSqM: Number(areaSqM),
+      lat, 
+      lng 
     });
-    
-    const currentInput = inputRef.current;
-    const disableEnter = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') e.preventDefault();
-    };
-    currentInput.addEventListener('keydown', disableEnter);
-    
-    return () => {
-      if (currentInput) {
-        currentInput.removeEventListener('keydown', disableEnter);
-      }
-    };
-  }, [placesLib]);
+  };
 
   return (
-    <DialogContent className="sm:max-w-[600px] overflow-y-auto max-h-[90vh]">
+    <DialogContent className="sm:max-w-[700px] overflow-y-auto max-h-[90vh]">
       <DialogHeader>
-        <DialogTitle>Nueva Propiedad</DialogTitle>
+        <DialogTitle>{initialData ? "Editar Propiedad" : "Nueva Propiedad"}</DialogTitle>
         <DialogDescription>
-          Ingresa los datos y marca la ubicación en el mapa.
+          {initialData ? "Modifica la ficha técnica y características del inmueble." : "Ingresa la ficha técnica. La ubicación se localizará automáticamente a partir de la dirección."}
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4 py-4">
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Título</label>
-            <Input placeholder="Ej. Casa en Palermo" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <label className="text-sm font-medium">Título de Publicación</label>
+            <Input placeholder="Ej. Excelente Casa en Palermo" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Precio (USD)</label>
             <Input type="number" placeholder="250000" value={price} onChange={(e) => setPrice(e.target.value)} />
           </div>
         </div>
+
         <div className="space-y-2">
-          <label className="text-sm font-medium">Dirección (Autocompletar)</label>
-          <Input 
-            ref={inputRef}
-            placeholder="Av. Libertador 1234" 
-            value={address} 
-            onChange={(e) => setAddress(e.target.value)} 
+          <label className="text-sm font-medium">Descripción de la Propiedad</label>
+          <Textarea 
+            placeholder="Describe los detalles, virtudes y características de la propiedad..." 
+            value={description} 
+            onChange={(e) => setDescription(e.target.value)}
+            className="min-h-[100px]"
           />
         </div>
-
-        <div className="space-y-2 relative">
-          <label className="text-sm font-medium">Geolocalización</label>
-          <div className="h-48 rounded border overflow-hidden relative">
-            <MapWrapper selPos={selPos} setSelPos={setSelPos} />
+        
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Dirección Exacta</label>
+            <Input 
+              placeholder="Ej. Av Libertador 1234" 
+              value={address} 
+              onChange={(e) => setAddress(e.target.value)} 
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Ciudad / Localidad</label>
+            <Input 
+              placeholder="Ej. CABA, Argentina" 
+              value={city} 
+              onChange={(e) => setCity(e.target.value)} 
+            />
           </div>
         </div>
 
-        <Button onClick={() => onSave({ title, price: Number(price), address, lat: selPos.lat, lng: selPos.lng })} className="w-full bg-blue-600">
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Habitaciones</label>
+            <Input type="number" placeholder="3" value={bedrooms} onChange={(e) => setBedrooms(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Baños</label>
+            <Input type="number" placeholder="2" value={bathrooms} onChange={(e) => setBathrooms(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Área (m²)</label>
+            <Input type="number" placeholder="120" value={areaSqM} onChange={(e) => setAreaSqM(e.target.value)} />
+          </div>
+        </div>
+
+        <Button onClick={handleSaveData} className="w-full bg-blue-600 hover:bg-blue-700">
           Guardar Propiedad
         </Button>
       </div>
@@ -102,48 +127,14 @@ function AddPropertyForm({ addingProperty, setAddingProperty, onSave }: any) {
   );
 }
 
-import { useMap } from '@vis.gl/react-google-maps';
 
-function MapWrapper({ selPos, setSelPos }: { selPos: any, setSelPos: any }) {
-  const map = useMap();
-  
-  useEffect(() => {
-    if (map) {
-      map.panTo(selPos);
-    }
-  }, [selPos, map]);
-
-  return (
-    <Map
-      defaultCenter={selPos}
-      defaultZoom={14}
-      mapId="MAP_ADD_PROPERTY"
-      internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-      style={{ width: '100%', height: '100%' }}
-      onClick={(e) => {
-        if (e.detail.latLng) {
-          setSelPos({ lat: e.detail.latLng.lat, lng: e.detail.latLng.lng });
-        }
-      }}
-    >
-      <AdvancedMarker position={selPos}>
-        <Pin background="#2563eb" glyphColor="#fff" />
-      </AdvancedMarker>
-    </Map>
-  );
-}
 
 export function Properties() {
   const { user } = useAuth();
   const [addingProperty, setAddingProperty] = useState(false);
-  const [selPos, setSelPos] = useState({ lat: -34.588, lng: -58.431 });
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Form state
-  const [title, setTitle] = useState("");
-  const [price, setPrice] = useState("");
-  const [address, setAddress] = useState("");
 
   useEffect(() => {
     if (!user || (!db)) return;
@@ -172,7 +163,6 @@ export function Properties() {
         ...propertyData,
         agentId: user.uid,
         status: "disponible",
-        type: "casa",
         currency: "USD",
         images: [],
         createdAt: Date.now(),
@@ -185,31 +175,27 @@ export function Properties() {
     }
   };
 
-  const handleSave = async () => {
-    if (!user || !title || !price || !db) return;
-    
+  const handleUpdateExternal = async (propertyData: any) => {
+    if (!user || (!db) || !editingProperty) return;
     try {
-      await addDoc(collection(db, "properties"), {
-        title,
-        price: Number(price),
-        address,
-        lat: selPos.lat,
-        lng: selPos.lng,
-        agentId: user.uid,
-        status: "disponible" as PropertyStatus,
-        type: "casa" as PropertyType,
-        currency: "USD",
-        images: [],
-        createdAt: Date.now(),
+      await updateDoc(doc(db, "properties", editingProperty.id), {
+        title: propertyData.title,
+        description: propertyData.description,
+        price: propertyData.price,
+        address: propertyData.address,
+        city: propertyData.city || "",
+        type: propertyData.type || "casa",
+        bedrooms: propertyData.bedrooms || 0,
+        bathrooms: propertyData.bathrooms || 0,
+        areaSqM: propertyData.areaSqM || 0,
+        lat: propertyData.lat,
+        lng: propertyData.lng,
         updatedAt: Date.now()
       });
-      setAddingProperty(false);
-      setTitle("");
-      setPrice("");
-      setAddress("");
+      setEditingProperty(null);
     } catch (e) {
-      console.error("Error adding property", e);
-      alert("Error al guardar la propiedad");
+      console.error("Error updating property", e);
+      alert("Error al editar la propiedad");
     }
   };
 
@@ -221,35 +207,43 @@ export function Properties() {
           <p className="text-slate-500">Gestiona tu cartera de inmuebles.</p>
         </div>
         
-        <Dialog open={addingProperty} onOpenChange={setAddingProperty}>
-          <DialogTrigger render={<Button className="bg-blue-600 hover:bg-blue-700" />}>
-            <Plus className="w-4 h-4 mr-2" />
-            Nueva Propiedad
-          </DialogTrigger>
-          {hasValidKey ? (
-            <APIProvider apiKey={API_KEY} version="weekly">
-              <AddPropertyForm 
-                addingProperty={addingProperty} 
-                setAddingProperty={setAddingProperty} 
+        <div className="flex gap-2">
+          <Button 
+            variant="outline"
+            onClick={() => {
+              const url = `${window.location.origin}/portfolio/${user?.uid}`;
+              navigator.clipboard.writeText(url);
+              alert("Link del Portfolio copiado al portapapeles:\n" + url);
+            }}
+          >
+            <Share2 className="w-4 h-4 mr-2" />
+            Compartir Portfolio
+          </Button>
+          <Dialog open={addingProperty} onOpenChange={setAddingProperty}>
+            <DialogTrigger render={<Button className="bg-blue-600 hover:bg-blue-700" />}>
+              <Plus className="w-4 h-4 mr-2" />
+              Nueva Propiedad
+            </DialogTrigger>
+            {addingProperty && (
+              <PropertyForm 
+                isOpen={addingProperty} 
+                setIsOpen={setAddingProperty} 
                 onSave={handleSaveExternal} 
               />
-            </APIProvider>
-          ) : (
-            <DialogContent className="sm:max-w-[600px] overflow-y-auto max-h-[90vh]">
-              <DialogHeader>
-                <DialogTitle>Nueva Propiedad</DialogTitle>
-                <DialogDescription>
-                  Ingresa los datos y marca la ubicación en el mapa.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="p-4 bg-slate-100 text-slate-500 rounded text-center">
-                  Añade GOOGLE_MAPS_PLATFORM_KEY en los secretos para añadir propiedades.
-                </div>
-              </div>
-            </DialogContent>
+            )}
+          </Dialog>
+
+        <Dialog open={!!editingProperty} onOpenChange={(open) => !open && setEditingProperty(null)}>
+          {editingProperty && (
+            <PropertyForm
+              initialData={editingProperty}
+              isOpen={!!editingProperty}
+              setIsOpen={(v: boolean) => !v && setEditingProperty(null)}
+              onSave={handleUpdateExternal}
+            />
           )}
         </Dialog>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">
@@ -280,49 +274,67 @@ export function Properties() {
                 <h3 className="font-medium text-slate-900 mb-1">{prop.title}</h3>
                 <p className="text-sm text-slate-500 capitalize">{prop.type}</p>
                 
-                <Dialog>
-                  <DialogTrigger render={<Button className="w-full mt-4 bg-slate-900 hover:bg-slate-800 text-white" />}>
-                    Ver más detalles
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[700px] overflow-y-auto max-h-[90vh]">
-                    <DialogHeader>
-                      <DialogTitle className="text-2xl">{prop.title}</DialogTitle>
-                      <DialogDescription className="text-lg font-bold text-slate-900 mt-1">${prop.price.toLocaleString()} USD</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-6 mt-4">
-                      <div className="h-64 bg-slate-200 flex items-center justify-center text-slate-500 text-lg rounded-md overflow-hidden">
-                        Sin imagen
-                      </div>
-                      
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div>
-                          <h4 className="font-semibold text-slate-900 mb-2">Especificaciones</h4>
-                          <ul className="space-y-2 text-sm text-slate-600">
-                            <li><span className="font-medium text-slate-900">Tipo:</span> <span className="capitalize">{prop.type}</span></li>
-                            <li><span className="font-medium text-slate-900">Estado:</span> <span className="capitalize">{prop.status}</span></li>
-                            <li><span className="font-medium text-slate-900">Dirección:</span> {prop.address}</li>
-                            {prop.lat && prop.lng ? (
-                              <li>
-                                <span className="font-medium text-slate-900">Coordenadas:</span> {prop.lat.toFixed(4)}, {prop.lng.toFixed(4)}
-                              </li>
-                            ) : null}
-                          </ul>
-                        </div>
+                <div className="flex gap-2 w-full mt-4">
+                  <Dialog>
+                    <DialogTrigger render={<Button className="flex-1 bg-slate-900 hover:bg-slate-800 text-white" />}>
+                      Ver Detalles
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[700px] overflow-y-auto max-h-[90vh]">
+                      <DialogHeader>
+                        <DialogTitle className="text-2xl">{prop.title}</DialogTitle>
+                        <DialogDescription className="text-lg font-bold text-slate-900 mt-1">${prop.price.toLocaleString()} USD</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-6 mt-4">
+                        {prop.description && (
+                          <div>
+                            <h4 className="font-semibold text-slate-900 mb-2">Descripción</h4>
+                            <p className="text-sm text-slate-600 whitespace-pre-line">{prop.description}</p>
+                          </div>
+                        )}
                         
-                        <div className="bg-slate-50 p-4 rounded-md border flex flex-col justify-center">
-                           <h4 className="font-semibold text-slate-900 mb-2">¿Te interesa?</h4>
-                           <p className="text-sm text-slate-600 mb-4">Ponte en contacto con el agente responsable para más detalles.</p>
-                           <Button 
-                            onClick={() => window.open(`/portfolio/${prop.agentId}`, '_blank')}
-                            className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-                           >
-                             Contactar al Agente
-                           </Button>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <h4 className="font-semibold text-slate-900 mb-2">Especificaciones</h4>
+                            <ul className="space-y-2 text-sm text-slate-600">
+                              <li><span className="font-medium text-slate-900">Dirección:</span> {prop.address} {prop.city && `, ${prop.city}`}</li>
+                              <li><span className="font-medium text-slate-900">Habitaciones:</span> {prop.bedrooms || "-"}</li>
+                              <li><span className="font-medium text-slate-900">Baños:</span> {prop.bathrooms || "-"}</li>
+                              <li><span className="font-medium text-slate-900">Área:</span> {prop.areaSqM ? `${prop.areaSqM} m²` : "-"}</li>
+                            </ul>
+                          </div>
+                          
+                          <div className="bg-slate-50 p-4 rounded-md border flex flex-col justify-center">
+                             <h4 className="font-semibold text-slate-900 mb-2">¿Te interesa?</h4>
+                             <p className="text-sm text-slate-600 mb-4">Ponte en contacto con el agente responsable para más detalles.</p>
+                             <div className="flex gap-2 w-full flex-wrap">
+                               <Button 
+                                onClick={() => window.open(`/property/${prop.id}`, '_blank')}
+                                className="flex-1 bg-slate-900 hover:bg-slate-800 text-white shadow-sm"
+                               >
+                                 Ver Publicación
+                               </Button>
+                               <Button
+                                 variant="outline"
+                                 onClick={() => {
+                                   const url = `${window.location.origin}/property/${prop.id}`;
+                                   navigator.clipboard.writeText(url);
+                                   alert("Link de la propiedad copiado:\n" + url);
+                                 }}
+                               >
+                                 <Copy className="w-4 h-4" />
+                               </Button>
+                             </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                    </DialogContent>
+                  </Dialog>
+                  
+                  <Button variant="outline" className="flex-1 text-slate-600 hover:text-slate-900" onClick={() => setEditingProperty(prop)}>
+                    <Edit2 className="w-4 h-4 mr-2" />
+                    Editar
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}

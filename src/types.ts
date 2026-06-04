@@ -15,6 +15,7 @@ export type Property = {
   price: number;
   currency: string;
   address: string;
+  city?: string;
   lat: number;
   lng: number;
   status: PropertyStatus;

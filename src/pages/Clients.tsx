@@ -32,6 +32,7 @@ export function Clients() {
   const { user } = useAuth();
   const [clients, setClients] = useState<any[]>([]);
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
+  const [automations, setAutomations] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,8 +60,8 @@ export function Clients() {
       setClients(data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
     });
 
-    // Load templates
-    const loadTemplates = async () => {
+    // Load templates and automations
+    const loadSecondaryData = async () => {
       try {
         const tq = query(collection(db, "whatsappTemplates"), where("agentId", "==", user.uid));
         const tSnapshot = await getDocs(tq);
@@ -69,15 +70,39 @@ export function Clients() {
           tData.push({ id: doc.id, ...doc.data() } as WhatsAppTemplate);
         });
         setTemplates(tData);
+
+        const aq = query(collection(db, "automations"), where("agentId", "==", user.uid));
+        const aSnapshot = await getDocs(aq);
+        const aData: any[] = [];
+        aSnapshot.forEach((doc) => {
+          aData.push({ id: doc.id, ...doc.data() });
+        });
+        setAutomations(aData);
       } catch (error) {
-        console.error("Error fetching templates:", error);
+        console.error("Error fetching secondary data:", error);
       }
     };
     
-    loadTemplates();
+    loadSecondaryData();
 
     return () => unsubscribe();
   }, [user]);
+
+  const handleAssignToAutomation = async (clientId: string, automation: any) => {
+    try {
+      const targetLeads = automation.targetLeads || [];
+      if (!targetLeads.includes(clientId)) {
+        await updateDoc(doc(db, "automations", automation.id), {
+          targetLeads: [...targetLeads.filter((id: string) => id !== "all" && id !== "all_leads"), clientId]
+        });
+        alert(`Lead añadido a la automatización "${automation.name}" exitosamente.`);
+      } else {
+        alert('Este lead ya está asignado a esa automatización.');
+      }
+    } catch (error) {
+      console.error("Error al asignar automatización", error);
+    }
+  };
 
   const handleWhatsAppClick = (client: any, templateId?: string) => {
     if (!client.phone) return;
@@ -333,6 +358,20 @@ export function Clients() {
                             </DropdownMenuItem>
                           )}
                           <DropdownMenuSeparator />
+                          {automations.length > 0 && (
+                            <DropdownMenuGroup>
+                              <DropdownMenuLabel>Asignar Automatización</DropdownMenuLabel>
+                              {automations.map(aut => (
+                                <DropdownMenuItem 
+                                  key={aut.id} 
+                                  onClick={() => handleAssignToAutomation(client.id, aut)}
+                                >
+                                  {aut.name}
+                                </DropdownMenuItem>
+                              ))}
+                              <DropdownMenuSeparator />
+                            </DropdownMenuGroup>
+                          )}
                           <DropdownMenuItem 
                             className="text-red-600 focus:bg-red-50 focus:text-red-700"
                             onClick={() => handleDeleteClient(client.id)}

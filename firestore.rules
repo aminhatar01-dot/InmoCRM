@@ -47,6 +47,11 @@ service cloud.firestore {
     match /settings/{userId} {
       allow read, write: if isSignedIn() && isOwner(userId);
     }
+
+    // Integrations collection
+    match /integrations/{userId} {
+      allow read, write: if isSignedIn() && isOwner(userId);
+    }
     
     // WhatsApp Templates collection
     match /whatsappTemplates/{templateId} {

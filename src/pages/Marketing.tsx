@@ -1,16 +1,52 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useAuth } from "@/lib/AuthContext";
+import { db } from "@/lib/firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Sparkles, Copy, CheckCircle2 } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Sparkles, Copy, CheckCircle2, Link as LinkIcon, Unlink, ExternalLink, PlayCircle } from "lucide-react";
 
 export function Marketing() {
+  const { user } = useAuth();
   const [prompt, setPrompt] = useState("");
   const [platform, setPlatform] = useState("Meta Ads (Instagram/Facebook)");
   const [generating, setGenerating] = useState(false);
   const [generatedCopy, setGeneratedCopy] = useState("");
   const [copied, setCopied] = useState(false);
+
+  // Integrations state
+  const [integrations, setIntegrations] = useState<any>({});
+  const [loading, setLoading] = useState(true);
+  const [activePlatform, setActivePlatform] = useState<string | null>(null);
+  const [tokenInput, setTokenInput] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      fetchIntegrations();
+    }
+  }, [user]);
+
+  const fetchIntegrations = async () => {
+    if (!user) return;
+    try {
+      const docRef = doc(db, "integrations", user.uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setIntegrations(docSnap.data());
+      } else {
+        setIntegrations({});
+      }
+    } catch (error) {
+      console.error("Error fetching integrations:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleGenerate = async () => {
     if (!prompt) return;
@@ -41,6 +77,56 @@ export function Marketing() {
     navigator.clipboard.writeText(generatedCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleConnect = async () => {
+    if (!user || !activePlatform || !tokenInput.trim()) return;
+    setIsSaving(true);
+    try {
+      const docRef = doc(db, "integrations", user.uid);
+      await setDoc(docRef, { [activePlatform]: { connected: true, token: tokenInput, connectedAt: Date.now() } }, { merge: true });
+      setIntegrations((prev: any) => ({ ...prev, [activePlatform]: { connected: true } }));
+      setActivePlatform(null);
+      setTokenInput("");
+    } catch (error) {
+      console.error("Error connecting platform:", error);
+      alert("Error al vincular cuenta publicitaria");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDisconnect = async (platformName: string) => {
+    if (!user) return;
+    if (!confirm(`¿Estás seguro de que deseas desvincular ${platformName}?`)) return;
+    try {
+      const docRef = doc(db, "integrations", user.uid);
+      await setDoc(docRef, { [platformName]: { connected: false, token: null } }, { merge: true });
+      setIntegrations((prev: any) => ({ ...prev, [platformName]: { connected: false } }));
+    } catch (error) {
+      console.error("Error disconnecting platform:", error);
+    }
+  };
+
+  const openConnectDialog = (platformName: string) => {
+    setActivePlatform(platformName);
+    setTokenInput("");
+  };
+
+  const getPlatformLinks = (platform: string | null) => {
+    switch (platform) {
+      case 'metaAds':
+        return {
+          tokenUrl: "https://developers.facebook.com/apps/",
+          videoUrl: "https://www.youtube.com/results?search_query=como+generar+token+de+acceso+api+meta+ads"
+        };
+      case 'googleAds':
+        return {
+          tokenUrl: "https://ads.google.com/aw/apicenter",
+          videoUrl: "https://www.youtube.com/results?search_query=como+generar+developer+token+google+ads"
+        };
+      default: return null;
+    }
   };
 
   return (
@@ -133,10 +219,26 @@ export function Marketing() {
             <CardDescription>Genera leads promocionando propiedades específicas.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-slate-50 p-4 rounded-md text-sm text-slate-500">
-              Para lanzar campañas, asegurate de tener tu cuenta publicitaria vinculada.
-            </div>
-            <Button className="w-full bg-[#1877F2] hover:bg-[#1877F2]/90">Vincular Meta Ads</Button>
+            {integrations?.metaAds?.connected ? (
+              <>
+                <div className="bg-green-50 p-4 rounded-md text-sm text-green-800 flex items-center">
+                  <CheckCircle2 className="w-5 h-5 mr-2 text-green-600" />
+                  Cuenta publicitaria vinculada correctamente.
+                </div>
+                <Button variant="ghost" className="w-full text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDisconnect("metaAds")}>
+                  <Unlink className="w-4 h-4 mr-2" /> Desvincular Meta Ads
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="bg-slate-50 p-4 rounded-md text-sm text-slate-500">
+                  Para lanzar campañas automáticamente, provee tu Access Token de sistema.
+                </div>
+                <Button className="w-full bg-[#1877F2] hover:bg-[#1877F2]/90" onClick={() => openConnectDialog("metaAds")}>
+                  <LinkIcon className="w-4 h-4 mr-2" /> Vincular Meta Ads
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -146,13 +248,82 @@ export function Marketing() {
             <CardDescription>Aparece en los primeros resultados de búsqueda.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-slate-50 p-4 rounded-md text-sm text-slate-500">
-               Campañas de red de búsqueda para captación de propiedades.
-            </div>
-            <Button className="w-full bg-[#DB4437] hover:bg-[#DB4437]/90">Vincular Google Ads</Button>
+            {integrations?.googleAds?.connected ? (
+              <>
+                <div className="bg-green-50 p-4 rounded-md text-sm text-green-800 flex items-center">
+                  <CheckCircle2 className="w-5 h-5 mr-2 text-green-600" />
+                  Cuenta de Google Ads vinculada correctamente.
+                </div>
+                <Button variant="ghost" className="w-full text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDisconnect("googleAds")}>
+                  <Unlink className="w-4 h-4 mr-2" /> Desvincular Google Ads
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="bg-slate-50 p-4 rounded-md text-sm text-slate-500">
+                  Campañas de red de búsqueda para captación de propiedades. Require Developer Token.
+                </div>
+                <Button className="w-full bg-[#DB4437] hover:bg-[#DB4437]/90" onClick={() => openConnectDialog("googleAds")}>
+                  <LinkIcon className="w-4 h-4 mr-2" /> Vincular Google Ads
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={!!activePlatform} onOpenChange={(open) => !open && setActivePlatform(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Vincular {activePlatform === 'metaAds' ? 'Meta Ads' : 'Google Ads'}</DialogTitle>
+            <DialogDescription>
+              Ingresa el token de acceso para permitir que el sistema cree campañas y lea métricas desde tu cuenta de {activePlatform === 'metaAds' ? 'Meta Ads' : 'Google Ads'}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Token de Acceso (Access Token)</Label>
+              <Input 
+                type="password" 
+                placeholder="Ingresa tu token de API..." 
+                value={tokenInput} 
+                onChange={(e) => setTokenInput(e.target.value)} 
+              />
+              <p className="text-xs text-slate-500">
+                Asegurate de que el token contenga los permisos de lectura y escritura de campañas publicitarias.
+              </p>
+            </div>
+            
+            {activePlatform && (
+              <div className="flex flex-col gap-3 mt-4 text-sm bg-slate-50 p-4 rounded-lg border border-slate-100">
+                <p className="font-medium text-slate-700">¿Necesitas ayuda para obtener tu token?</p>
+                <a 
+                  href={getPlatformLinks(activePlatform)?.tokenUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-2"
+                >
+                  <ExternalLink className="w-4 h-4" /> Ir a la página para obtener credenciales
+                </a>
+                <a 
+                  href={getPlatformLinks(activePlatform)?.videoUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-red-600 hover:text-red-800 hover:underline flex items-center gap-2"
+                >
+                  <PlayCircle className="w-4 h-4" /> Ver video instructivo paso a paso
+                </a>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setActivePlatform(null)} disabled={isSaving}>Cancelar</Button>
+            <Button onClick={handleConnect} disabled={isSaving || !tokenInput.trim()}>
+              {isSaving ? "Guardando..." : "Conectar Cuenta publicitaria"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

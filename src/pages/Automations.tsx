@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Plus, Edit, Trash2, Save, X, MessageSquare, CheckCircle2, QrCode, Bot, CalendarClock, BrainCircuit, Phone } from "lucide-react";
+import { Plus, Edit, Trash2, Save, X, MessageSquare, CheckCircle2, QrCode, Bot, CalendarClock, BrainCircuit, Phone, Sparkles } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 export interface WhatsAppTemplate {
   id: string;
@@ -105,10 +107,27 @@ export function Automations() {
 
   // AI & Agenda Config
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiResponseType, setAiResponseType] = useState<"templates" | "ai_reasoning">("ai_reasoning");
+  const [aiPersonality, setAiPersonality] = useState<"informative" | "closing" | "cold_lead" | "custom">("informative");
+  const [aiHandoffEnabled, setAiHandoffEnabled] = useState(true);
   const [aiPrompt, setAiPrompt] = useState("");
   const [agendaReminder, setAgendaReminder] = useState(true);
   const [agendaAgentNotif, setAgendaAgentNotif] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
+  
+  // Natural language automations
+  const [nlPrompt, setNlPrompt] = useState("");
+  const [nlGenerating, setNlGenerating] = useState(false);
+
+  // Advanced Rules State
+  const [customRules, setCustomRules] = useState<any[]>([]);
+  const [creatingRule, setCreatingRule] = useState(false);
+  const [ruleFormData, setRuleFormData] = useState<any>({
+    name: "", trigger: "price_drop", targetProperties: [], targetLeads: [], action: "send_message", delayHours: 0
+  });
+
+  const [properties, setProperties] = useState<any[]>([]);
+  const [clients, setClients] = useState<any[]>([]);
 
   useEffect(() => {
     async function loadData() {
@@ -124,6 +143,9 @@ export function Automations() {
             setWaConnected(true);
           }
           if (data.aiEnabled !== undefined) setAiEnabled(data.aiEnabled);
+          if (data.aiResponseType) setAiResponseType(data.aiResponseType);
+          if (data.aiPersonality) setAiPersonality(data.aiPersonality);
+          if (data.aiHandoffEnabled !== undefined) setAiHandoffEnabled(data.aiHandoffEnabled);
           if (data.aiPrompt) setAiPrompt(data.aiPrompt);
           if (data.agendaReminder !== undefined) setAgendaReminder(data.agendaReminder);
           if (data.agendaAgentNotif !== undefined) setAgendaAgentNotif(data.agendaAgentNotif);
@@ -140,6 +162,16 @@ export function Automations() {
           data.push({ id: doc.id, ...doc.data() } as WhatsAppTemplate);
         });
         setTemplates(data.sort((a, b) => b.createdAt - a.createdAt));
+
+        const propsQuery = await getDocs(query(collection(db, "properties"), where("agentId", "==", user.uid)));
+        setProperties(propsQuery.docs.map(d => ({id: d.id, ...d.data()})));
+        
+        const clientsQuery = await getDocs(query(collection(db, "clients"), where("agentId", "==", user.uid)));
+        setClients(clientsQuery.docs.map(d => ({id: d.id, ...d.data()})));
+
+        const rulesQuery = await getDocs(query(collection(db, "automations"), where("agentId", "==", user.uid)));
+        setCustomRules(rulesQuery.docs.map(d => ({id: d.id, ...d.data()})));
+
       } catch (error) {
         console.error("Error loading data:", error);
       } finally {
@@ -196,6 +228,25 @@ export function Automations() {
     }
   };
 
+  const handleSaveRule = async () => {
+    if (!user || !ruleFormData.name) return;
+    try {
+      const newRule = {
+        ...ruleFormData,
+        agentId: user.uid,
+        createdAt: Date.now()
+      };
+      const docRef = await addDoc(collection(db, "automations"), newRule);
+      setCustomRules([{ id: docRef.id, ...newRule }, ...customRules]);
+      setCreatingRule(false);
+      setRuleFormData({
+        name: "", trigger: "price_drop", targetProperties: [], targetLeads: [], action: "send_message", delayHours: 0
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleSaveWaConfig = async () => {
     if (!user) return;
     setWaSaving(true);
@@ -220,6 +271,9 @@ export function Automations() {
     try {
       await setDoc(doc(db, "settings", user.uid), {
         aiEnabled,
+        aiResponseType,
+        aiPersonality,
+        aiHandoffEnabled,
         aiPrompt,
         agendaReminder,
         agendaAgentNotif,
@@ -230,6 +284,36 @@ export function Automations() {
     } finally {
       setSavingSettings(false);
     }
+  };
+
+  const handleGenerateAutomation = async () => {
+    if (!nlPrompt.trim()) return;
+    setNlGenerating(true);
+    // Simulate generation of automation rule
+    setTimeout(() => {
+      setNlGenerating(false);
+      const newTemplateName = `IA: ${nlPrompt.substring(0, 20)}...`;
+      let trigger = "inactive_lead";
+      let action = "send_message";
+      
+      if (nlPrompt.toLowerCase().includes("precio")) trigger = "price_drop";
+      else if (nlPrompt.toLowerCase().includes("estado") || nlPrompt.toLowerCase().includes("vendida")) trigger = "status_change";
+      else if (nlPrompt.toLowerCase().includes("nuevo")) trigger = "new_lead";
+
+      if (nlPrompt.toLowerCase().includes("portafolio")) action = "send_portfolio";
+      else if (nlPrompt.toLowerCase().includes("recordatorio") || nlPrompt.toLowerCase().includes("agendar")) action = "create_task";
+
+      setRuleFormData({
+        name: newTemplateName,
+        trigger,
+        action,
+        targetProperties: ["all"],
+        targetLeads: ["all"],
+        delayHours: 48
+      });
+      setCreatingRule(true);
+      setNlPrompt("");
+    }, 1500);
   };
 
   return (
@@ -281,7 +365,7 @@ export function Automations() {
               Asistente Comercial de IA
             </CardTitle>
             <CardDescription>
-              Configura el comportamiento del agente de IA que responderá las consultas.
+              Personaliza cómo el agente de IA dialoga con tus clientes.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -297,17 +381,67 @@ export function Automations() {
                 onCheckedChange={setAiEnabled}
               />
             </div>
+            
             {aiEnabled && (
-              <div className="space-y-2">
-                <Label className="text-slate-700">Comportamiento / Instrucciones del Asistente</Label>
-                <Textarea 
-                  placeholder="Ej: Eres un vendedor inmobiliario amable. Ayuda a cerrar visitas. Proporciona solo la info de la propiedad que te pregunten..." 
-                  className="min-h-[100px] text-sm"
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                />
+              <div className="space-y-6 pt-4 border-t">
+                <div className="space-y-2">
+                  <Label>Tipo de Respuesta</Label>
+                  <Select value={aiResponseType} onValueChange={(val: any) => setAiResponseType(val)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona el tipo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ai_reasoning">Razonamiento Propio (Recomendado)</SelectItem>
+                      <SelectItem value="templates">Plantillas Predefinidas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-slate-500">Razonamiento propio permite que la IA elabore respuestas dinámicas basándose en tus propiedades.</p>
+                </div>
+
+                {aiResponseType === 'ai_reasoning' && (
+                  <div className="space-y-2">
+                     <Label>Personalidad del Asistente</Label>
+                     <Select value={aiPersonality} onValueChange={(val: any) => setAiPersonality(val)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona la personalidad" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="informative">Informativa y Educada</SelectItem>
+                        <SelectItem value="closing">Agresiva (Cerrar Citas a todo costo)</SelectItem>
+                        <SelectItem value="cold_lead">Captación de Leads en Frío</SelectItem>
+                        <SelectItem value="custom">Personalizada</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {(aiResponseType === 'templates' || aiPersonality === 'custom') && (
+                  <div className="space-y-2">
+                    <Label className="text-slate-700">Instrucciones Adicionales del Asistente</Label>
+                    <Textarea 
+                      placeholder="Ej: Eres un vendedor inmobiliario amable. Ayuda a cerrar visitas. Proporciona solo la info de la propiedad que te pregunten..." 
+                      className="min-h-[100px] text-sm"
+                      value={aiPrompt}
+                      onChange={(e) => setAiPrompt(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-medium text-slate-800">Intervención Humana (Hand-off)</Label>
+                    <p className="text-xs text-slate-500">
+                      Notificar al agente y pausar la IA cuando la conversación requiera un humano.
+                    </p>
+                  </div>
+                  <Switch 
+                    checked={aiHandoffEnabled}
+                    onCheckedChange={setAiHandoffEnabled}
+                  />
+                </div>
               </div>
             )}
+            
             <div className="pt-2 border-t flex justify-end">
               <Button 
                 onClick={handleSaveAISettings} 
@@ -493,6 +627,36 @@ export function Automations() {
         </div>
       )}
 
+      <Card className="mb-8 border-indigo-100 bg-indigo-50/30">
+        <CardContent className="p-6">
+          <div className="flex gap-4 items-start">
+            <div className="bg-indigo-100 p-2 rounded-full mt-1">
+              <Sparkles className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div className="flex-1 space-y-3">
+              <div>
+                <h3 className="font-semibold text-slate-800 text-lg">Generar Automatizaciones con IA</h3>
+                <p className="text-slate-600 text-sm">Puedes decirle al asistente qué tipo de regla o mensaje quieres y te lo creará en segundos. Ej: "Agendar visita si...", "Recordatorio 48hs antes...", "Mensaje de recaptación..."</p>
+              </div>
+              <div className="flex gap-2">
+                <Input 
+                  placeholder="Ej: Si un cliente no responde después de 2 días, enviarle algo para atraerlo..."
+                  value={nlPrompt}
+                  onChange={(e) => setNlPrompt(e.target.value)}
+                  className="bg-white"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleGenerateAutomation();
+                  }}
+                />
+                <Button onClick={handleGenerateAutomation} disabled={nlGenerating || !nlPrompt.trim()} className="bg-indigo-600 hover:bg-indigo-700 whitespace-nowrap shadow-sm">
+                  {nlGenerating ? "Generando..." : "Crear Regla"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex items-center justify-between mt-8 mb-4">
         <h3 className="text-xl font-bold text-slate-900">Plantillas de Mensajes</h3>
         <Button onClick={handleOpenNew} className="bg-blue-600 hover:bg-blue-700">
@@ -574,6 +738,147 @@ export function Automations() {
           ))}
         </div>
       )}
+
+      {/* Advanced Rules Section */}
+      <div className="flex items-center justify-between mt-12 mb-4">
+        <div>
+          <h3 className="text-xl font-bold text-slate-900">Reglas y Automatizaciones Avanzadas</h3>
+          <p className="text-slate-500 text-sm">Ejecuta acciones basadas en eventos de propiedades o leads.</p>
+        </div>
+        <Button onClick={() => setCreatingRule(true)} className="bg-indigo-600 hover:bg-indigo-700">
+          <BrainCircuit className="w-4 h-4 mr-2" />
+          Nueva Regla
+        </Button>
+      </div>
+
+      <Dialog open={creatingRule} onOpenChange={setCreatingRule}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Nueva Regla de Automatización</DialogTitle>
+            <DialogDescription>
+              Configura un disparador y las acciones que el CRM deberá realizar automáticamente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 pt-4">
+            <div className="space-y-2">
+              <Label>Nombre de la Regla</Label>
+              <Input 
+                placeholder="Ej. Seguimiento tras baja de precio" 
+                value={ruleFormData.name}
+                onChange={e => setRuleFormData({...ruleFormData, name: e.target.value})}
+              />
+            </div>
+            
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>¿Cuándo debe ejecutarse? (Trigger)</Label>
+                <Select value={ruleFormData.trigger} onValueChange={(v) => setRuleFormData({...ruleFormData, trigger: v})}>
+                  <SelectTrigger><SelectValue/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="price_drop">Baja de Precio en Propiedad</SelectItem>
+                    <SelectItem value="status_change">Cambio de Estado (ej. Vendida)</SelectItem>
+                    <SelectItem value="new_lead">Nuevo Lead Recibido</SelectItem>
+                    <SelectItem value="inactive_lead">Lead sin responder por X días</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Acción a realizar</Label>
+                <Select value={ruleFormData.action} onValueChange={(v) => setRuleFormData({...ruleFormData, action: v})}>
+                  <SelectTrigger><SelectValue/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="send_message">Enviar Mensaje de WhatsApp</SelectItem>
+                    <SelectItem value="send_portfolio">Enviar Portafolio del Agente</SelectItem>
+                    <SelectItem value="create_task">Crear Recordatorio para el Agente</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2 border p-4 rounded-md bg-slate-50">
+              <Label>Propiedades a Monitorear</Label>
+              <Select 
+                value={ruleFormData.targetProperties[0] || "all"} 
+                onValueChange={(v) => setRuleFormData({...ruleFormData, targetProperties: [v]})}
+              >
+                <SelectTrigger><SelectValue placeholder="Selecciona..."/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las Propiedades</SelectItem>
+                  {properties.map(p => (
+                   <SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2 border p-4 rounded-md bg-slate-50">
+              <Label>Leads o Clientes Objetivo</Label>
+              <Select 
+                value={ruleFormData.targetLeads[0] || "all"} 
+                onValueChange={(v) => setRuleFormData({...ruleFormData, targetLeads: [v]})}
+              >
+                <SelectTrigger><SelectValue placeholder="Selecciona..."/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Filtro Automático por Inteligencia Artificial</SelectItem>
+                  <SelectItem value="all_leads">Todos los Leads Activos</SelectItem>
+                  {clients.map(c => (
+                   <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-500 mt-2">
+                El Filtro por IA enviará la acción solo a los clientes cuyo historial indique interés en esta propiedad o similares.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setCreatingRule(false)}>Cancelar</Button>
+              <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={handleSaveRule} disabled={!ruleFormData.name}>
+                Guardar Regla
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {customRules.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center p-8 text-center text-slate-500">
+            <BrainCircuit className="w-12 h-12 mb-4 text-indigo-300" />
+            <p>No tienes reglas avanzadas configuradas.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {customRules.map(rule => (
+            <Card key={rule.id} className="border-indigo-100">
+              <CardHeader className="pb-3 border-b border-indigo-50 flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="text-md text-indigo-900">{rule.name}</CardTitle>
+                </div>
+                <Button variant="ghost" size="icon" onClick={async () => {
+                  await deleteDoc(doc(db, "automations", rule.id));
+                  setCustomRules(customRules.filter(r => r.id !== rule.id));
+                }} className="h-8 w-8 text-slate-400 hover:text-red-600">
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-2">
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="font-medium">Trigger:</span>
+                  <span className="capitalize">{rule.trigger.replace('_', ' ')}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="font-medium">Action:</span>
+                  <span className="capitalize">{rule.action.replace('_', ' ')}</span>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
     </div>
   );
 }

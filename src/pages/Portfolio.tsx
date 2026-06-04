@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useParams } from "react-router-dom";
 import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, addDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, addDoc, onSnapshot } from "firebase/firestore";
 import { Property, ClientType, ClientStatus } from "@/src/types";
 
 export function Portfolio() {
@@ -27,23 +27,20 @@ export function Portfolio() {
   useEffect(() => {
     if (!agentId || !db) return;
 
-    const fetchProperties = async () => {
-      try {
-        const q = query(collection(db, "properties"), where("agentId", "==", agentId));
-        const snapshot = await getDocs(q);
-        const propsData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Property[];
-        setProperties(propsData);
-      } catch (err) {
-        console.error("Error fetching portfolio properties", err);
-      } finally {
-        setLoading(false);
-      }
-    };
+    const q = query(collection(db, "properties"), where("agentId", "==", agentId));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const propsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Property[];
+      setProperties(propsData);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching portfolio properties", error);
+      setLoading(false);
+    });
     
-    fetchProperties();
+    return () => unsubscribe();
   }, [agentId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -159,12 +156,24 @@ export function Portfolio() {
                   <h3 className="font-medium text-slate-900 mb-1">{prop.title}</h3>
                   <p className="text-sm text-slate-500 capitalize">{prop.type}</p>
                   
-                  <Button className="w-full mt-4 bg-slate-900" onClick={() => {
-                     setNotes(`Me interesa consultar por la propiedad: ${prop.title}`);
-                     setOpenContact(true);
-                  }}>
-                    Solicitar Información
-                  </Button>
+                  <div className="flex gap-2 mt-4">
+                    <Button 
+                      className="flex-1 bg-slate-900" 
+                      onClick={() => window.open(`/property/${prop.id}`, '_blank')}
+                    >
+                      Ver Detalle
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      className="flex-1" 
+                      onClick={() => {
+                        setNotes(`Me interesa consultar por la propiedad: ${prop.title}`);
+                        setOpenContact(true);
+                      }}
+                    >
+                      Solicitar Info
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}
