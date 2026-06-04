@@ -9,8 +9,10 @@ import { Marketing } from "./pages/Marketing";
 import { Portals } from "./pages/Portals";
 import { Documents } from "./pages/Documents";
 import { Appointments } from "./pages/Appointments";
+import { Settings } from "./pages/Settings";
 import { Login } from "./pages/Login";
 import { Portfolio } from "./pages/Portfolio";
+import { Inbox } from "./pages/Inbox";
 import { AuthProvider } from "@/lib/AuthContext";
 
 function App() {
@@ -26,11 +28,13 @@ function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/properties" element={<Properties />} />
               <Route path="/clients" element={<Clients />} />
+              <Route path="/inbox" element={<Inbox />} />
               <Route path="/automations" element={<Automations />} />
               <Route path="/marketing" element={<Marketing />} />
               <Route path="/portals" element={<Portals />} />
               <Route path="/documents" element={<Documents />} />
               <Route path="/appointments" element={<Appointments />} />
+              <Route path="/settings" element={<Settings />} />
             </Route>
           </Route>
         </Routes>

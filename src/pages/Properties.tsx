@@ -5,7 +5,7 @@ import { Plus, Search, MapPin } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
+import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { db } from "@/lib/firebase";
 import { collection, addDoc, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import { useAuth } from "@/lib/AuthContext";
@@ -16,6 +16,122 @@ const API_KEY =
   (globalThis as any).GOOGLE_MAPS_PLATFORM_KEY ||
   '';
 const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
+
+function AddPropertyForm({ addingProperty, setAddingProperty, onSave }: any) {
+  const [title, setTitle] = useState("");
+  const [price, setPrice] = useState("");
+  const [address, setAddress] = useState("");
+  const [selPos, setSelPos] = useState({ lat: -34.588, lng: -58.431 });
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const placesLib = useMapsLibrary('places');
+
+  useEffect(() => {
+    if (!placesLib || !inputRef.current) return;
+
+    const autocomplete = new placesLib.Autocomplete(inputRef.current, {
+      fields: ['formatted_address', 'geometry', 'name'],
+    });
+
+    autocomplete.addListener('place_changed', () => {
+      const place = autocomplete.getPlace();
+      if (!place.geometry || !place.geometry.location) {
+        return;
+      }
+      setAddress(place.formatted_address || place.name || "");
+      setSelPos({
+        lat: place.geometry.location.lat(),
+        lng: place.geometry.location.lng()
+      });
+    });
+    
+    const currentInput = inputRef.current;
+    const disableEnter = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') e.preventDefault();
+    };
+    currentInput.addEventListener('keydown', disableEnter);
+    
+    return () => {
+      if (currentInput) {
+        currentInput.removeEventListener('keydown', disableEnter);
+      }
+    };
+  }, [placesLib]);
+
+  return (
+    <DialogContent className="sm:max-w-[600px] overflow-y-auto max-h-[90vh]">
+      <DialogHeader>
+        <DialogTitle>Nueva Propiedad</DialogTitle>
+        <DialogDescription>
+          Ingresa los datos y marca la ubicación en el mapa.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 py-4">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Título</label>
+            <Input placeholder="Ej. Casa en Palermo" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Precio (USD)</label>
+            <Input type="number" placeholder="250000" value={price} onChange={(e) => setPrice(e.target.value)} />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Dirección (Autocompletar)</label>
+          <Input 
+            ref={inputRef}
+            placeholder="Av. Libertador 1234" 
+            value={address} 
+            onChange={(e) => setAddress(e.target.value)} 
+          />
+        </div>
+
+        <div className="space-y-2 relative">
+          <label className="text-sm font-medium">Geolocalización</label>
+          <div className="h-48 rounded border overflow-hidden relative">
+            <MapWrapper selPos={selPos} setSelPos={setSelPos} />
+          </div>
+        </div>
+
+        <Button onClick={() => onSave({ title, price: Number(price), address, lat: selPos.lat, lng: selPos.lng })} className="w-full bg-blue-600">
+          Guardar Propiedad
+        </Button>
+      </div>
+    </DialogContent>
+  );
+}
+
+import { useMap } from '@vis.gl/react-google-maps';
+
+function MapWrapper({ selPos, setSelPos }: { selPos: any, setSelPos: any }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (map) {
+      map.panTo(selPos);
+    }
+  }, [selPos, map]);
+
+  return (
+    <Map
+      defaultCenter={selPos}
+      defaultZoom={14}
+      mapId="MAP_ADD_PROPERTY"
+      internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+      style={{ width: '100%', height: '100%' }}
+      onClick={(e) => {
+        if (e.detail.latLng) {
+          setSelPos({ lat: e.detail.latLng.lat, lng: e.detail.latLng.lng });
+        }
+      }}
+    >
+      <AdvancedMarker position={selPos}>
+        <Pin background="#2563eb" glyphColor="#fff" />
+      </AdvancedMarker>
+    </Map>
+  );
+}
 
 export function Properties() {
   const { user } = useAuth();
@@ -48,6 +164,26 @@ export function Properties() {
 
     return () => unsubscribe();
   }, [user]);
+
+  const handleSaveExternal = async (propertyData: any) => {
+    if (!user || (!db)) return;
+    try {
+      await addDoc(collection(db, "properties"), {
+        ...propertyData,
+        agentId: user.uid,
+        status: "disponible",
+        type: "casa",
+        currency: "USD",
+        images: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+      setAddingProperty(false);
+    } catch (e) {
+      console.error("Error adding property", e);
+      alert("Error al guardar la propiedad");
+    }
+  };
 
   const handleSave = async () => {
     if (!user || !title || !price || !db) return;
@@ -90,64 +226,29 @@ export function Properties() {
             <Plus className="w-4 h-4 mr-2" />
             Nueva Propiedad
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px] overflow-y-auto max-h-[90vh]">
-            <DialogHeader>
-              <DialogTitle>Nueva Propiedad</DialogTitle>
-              <DialogDescription>
-                Ingresa los datos y marca la ubicación en el mapa.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Título</label>
-                  <Input placeholder="Ej. Casa en Palermo" value={title} onChange={(e) => setTitle(e.target.value)} />
+          {hasValidKey ? (
+            <APIProvider apiKey={API_KEY} version="weekly">
+              <AddPropertyForm 
+                addingProperty={addingProperty} 
+                setAddingProperty={setAddingProperty} 
+                onSave={handleSaveExternal} 
+              />
+            </APIProvider>
+          ) : (
+            <DialogContent className="sm:max-w-[600px] overflow-y-auto max-h-[90vh]">
+              <DialogHeader>
+                <DialogTitle>Nueva Propiedad</DialogTitle>
+                <DialogDescription>
+                  Ingresa los datos y marca la ubicación en el mapa.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="p-4 bg-slate-100 text-slate-500 rounded text-center">
+                  Añade GOOGLE_MAPS_PLATFORM_KEY en los secretos para añadir propiedades.
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Precio (USD)</label>
-                  <Input type="number" placeholder="250000" value={price} onChange={(e) => setPrice(e.target.value)} />
-                </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Dirección</label>
-                <Input placeholder="Av. Libertador 1234" value={address} onChange={(e) => setAddress(e.target.value)} />
-              </div>
-
-              <div className="space-y-2 relative">
-                <label className="text-sm font-medium">Geolocalización</label>
-                {!hasValidKey ? (
-                  <div className="h-48 bg-slate-100 flex items-center justify-center rounded border p-4 text-center text-sm text-slate-500">
-                    Añade GOOGLE_MAPS_PLATFORM_KEY en los secretos para activar la geolocalización.
-                  </div>
-                ) : (
-                  <div className="h-48 rounded border overflow-hidden">
-                    <APIProvider apiKey={API_KEY} version="weekly">
-                      <Map
-                        defaultCenter={selPos}
-                        defaultZoom={14}
-                        mapId="MAP_ADD_PROPERTY"
-                        internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-                        style={{ width: '100%', height: '100%' }}
-                        onClick={(e) => {
-                          if (e.detail.latLng) {
-                            setSelPos({ lat: e.detail.latLng.lat, lng: e.detail.latLng.lng });
-                          }
-                        }}
-                      >
-                        <AdvancedMarker position={selPos}>
-                          <Pin background="#2563eb" glyphColor="#fff" />
-                        </AdvancedMarker>
-                      </Map>
-                    </APIProvider>
-                  </div>
-                )}
-              </div>
-
-              <Button onClick={handleSave} className="w-full bg-blue-600">
-                Guardar Propiedad
-              </Button>
-            </div>
-          </DialogContent>
+            </DialogContent>
+          )}
         </Dialog>
       </div>
 
@@ -178,6 +279,50 @@ export function Properties() {
                 </div>
                 <h3 className="font-medium text-slate-900 mb-1">{prop.title}</h3>
                 <p className="text-sm text-slate-500 capitalize">{prop.type}</p>
+                
+                <Dialog>
+                  <DialogTrigger render={<Button className="w-full mt-4 bg-slate-900 hover:bg-slate-800 text-white" />}>
+                    Ver más detalles
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-[700px] overflow-y-auto max-h-[90vh]">
+                    <DialogHeader>
+                      <DialogTitle className="text-2xl">{prop.title}</DialogTitle>
+                      <DialogDescription className="text-lg font-bold text-slate-900 mt-1">${prop.price.toLocaleString()} USD</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-6 mt-4">
+                      <div className="h-64 bg-slate-200 flex items-center justify-center text-slate-500 text-lg rounded-md overflow-hidden">
+                        Sin imagen
+                      </div>
+                      
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <h4 className="font-semibold text-slate-900 mb-2">Especificaciones</h4>
+                          <ul className="space-y-2 text-sm text-slate-600">
+                            <li><span className="font-medium text-slate-900">Tipo:</span> <span className="capitalize">{prop.type}</span></li>
+                            <li><span className="font-medium text-slate-900">Estado:</span> <span className="capitalize">{prop.status}</span></li>
+                            <li><span className="font-medium text-slate-900">Dirección:</span> {prop.address}</li>
+                            {prop.lat && prop.lng ? (
+                              <li>
+                                <span className="font-medium text-slate-900">Coordenadas:</span> {prop.lat.toFixed(4)}, {prop.lng.toFixed(4)}
+                              </li>
+                            ) : null}
+                          </ul>
+                        </div>
+                        
+                        <div className="bg-slate-50 p-4 rounded-md border flex flex-col justify-center">
+                           <h4 className="font-semibold text-slate-900 mb-2">¿Te interesa?</h4>
+                           <p className="text-sm text-slate-600 mb-4">Ponte en contacto con el agente responsable para más detalles.</p>
+                           <Button 
+                            onClick={() => window.open(`/portfolio/${prop.agentId}`, '_blank')}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                           >
+                             Contactar al Agente
+                           </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </CardContent>
             </Card>
           ))}

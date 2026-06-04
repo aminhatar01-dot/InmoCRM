@@ -9,27 +9,31 @@ import {
   FileText, 
   Settings,
   LogOut,
-  Megaphone
+  Megaphone,
+  Menu
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { useState } from "react";
 
-const menuItems = [
+export const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
-  { icon: MessageSquare, label: "Mensajes & Chat", path: "/inbox" },
   { icon: Building2, label: "Propiedades", path: "/properties" },
   { icon: Users, label: "Clientes & Leads", path: "/clients" },
-  { icon: Calendar, label: "Citas & Agenda", path: "/appointments" },
-  { icon: Settings, label: "Automatizaciones", path: "/automations" },
+  { icon: Calendar, label: "Citas", path: "/appointments" },
+  { icon: MessageSquare, label: "Automatizaciones (CRM)", path: "/automations" },
   { icon: Megaphone, label: "Marketing", path: "/marketing" },
   { icon: Share2, label: "Portales de Venta", path: "/portals" },
   { icon: FileText, label: "Formularios y Docs", path: "/documents" },
+  { icon: Settings, label: "Configuración", path: "/settings" },
 ];
 
-export function Sidebar() {
+export function SidebarContent({ onClickLink }: { onClickLink?: () => void }) {
   const location = useLocation();
 
   return (
-    <div className="w-64 border-r bg-white h-screen flex flex-col hidden md:flex">
+    <div className="flex flex-col h-full bg-white">
       <div className="p-6">
         <h1 className="text-2xl font-bold text-blue-600 flex items-center gap-2">
           <Building2 className="w-8 h-8"/>
@@ -44,6 +48,7 @@ export function Sidebar() {
             <Link
               key={item.path}
               to={item.path}
+              onClick={onClickLink}
               className={cn(
                 "flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-sm font-medium",
                 isActive 
@@ -65,5 +70,28 @@ export function Sidebar() {
         </button>
       </div>
     </div>
+  );
+}
+
+export function Sidebar() {
+  return (
+    <div className="w-64 border-r bg-white h-screen hidden md:flex flex-col sticky top-0">
+      <SidebarContent />
+    </div>
+  );
+}
+
+export function MobileSidebar() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger render={<Button variant="ghost" size="icon" className="md:hidden" />}>
+        <Menu className="w-6 h-6" />
+      </SheetTrigger>
+      <SheetContent side="left" className="p-0 w-72">
+        <SidebarContent onClickLink={() => setOpen(false)} />
+      </SheetContent>
+    </Sheet>
   );
 }
