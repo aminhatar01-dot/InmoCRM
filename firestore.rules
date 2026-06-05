@@ -1,68 +1,78 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Basic helpers
-    function isSignedIn() { return request.auth != null; }
-    function isOwner(userId) { return request.auth.uid == userId; }
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-    function isValidString(val, maxLen) { return val is string && val.size() <= maxLen; }
-
-    // Users collection
-    match /users/{userId} {
-      allow read: if isSignedIn(); // Other agents can see basic details
-      allow write: if isSignedIn() && isOwner(userId);
-    }
-    
-    // Properties collection
-    match /properties/{propertyId} {
-      allow read: if true; // Public can see properties
-      allow create: if isSignedIn() && incoming().agentId == request.auth.uid;
-      allow update, delete: if isSignedIn() && existing().agentId == request.auth.uid;
-    }
-
-    // Clients collection
-    match /clients/{clientId} {
-      allow read: if isSignedIn() && existing().agentId == request.auth.uid;
-      allow create: if true; // Public can submit leads
-      allow update, delete: if isSignedIn() && existing().agentId == request.auth.uid;
-    }
-
-    // Appointments collection
-    match /appointments/{appointmentId} {
-      allow read: if isSignedIn() && existing().agentId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().agentId == request.auth.uid;
-      allow update, delete: if isSignedIn() && existing().agentId == request.auth.uid;
-    }
-
-    // DocumentTemplates collection
-    match /documentTemplates/{templateId} {
-      allow read: if isSignedIn() && existing().agentId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().agentId == request.auth.uid;
-      allow update, delete: if isSignedIn() && existing().agentId == request.auth.uid;
-    }
-    
-    // Settings collection
-    match /settings/{userId} {
-      allow read, write: if isSignedIn() && isOwner(userId);
-    }
-
-    // Integrations collection
-    match /integrations/{userId} {
-      allow read, write: if isSignedIn() && isOwner(userId);
-    }
-    
-    // WhatsApp Templates collection
-    match /whatsappTemplates/{templateId} {
-      allow read: if isSignedIn() && existing().agentId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().agentId == request.auth.uid;
-      allow update, delete: if isSignedIn() && existing().agentId == request.auth.uid;
-    }
-    
-    // Safety net
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isValidId(id) {
+       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function isAgentAndOwner(docData) {
+       return isSignedIn() && docData.agentId == request.auth.uid;
+    }
+
+    match /properties/{docId} {
+      allow get: if isValidId(docId);
+      allow list: if true;
+      allow create: if isValidId(docId) && isAgentAndOwner(request.resource.data);
+      allow update: if isValidId(docId) && isAgentAndOwner(resource.data) && isAgentAndOwner(request.resource.data);
+      allow delete: if isValidId(docId) && isAgentAndOwner(resource.data);
+    }
+    
+    match /clients/{docId} {
+      allow get: if isValidId(docId) && isAgentAndOwner(resource.data);
+      allow list: if isAgentAndOwner(resource.data);
+      allow create: if isValidId(docId) && request.resource.data.keys().hasAny(['agentId']);
+      allow update: if isValidId(docId) && isAgentAndOwner(resource.data) && isAgentAndOwner(request.resource.data);
+      allow delete: if isValidId(docId) && isAgentAndOwner(resource.data);
+    }
+    
+    match /whatsappTemplates/{docId} {
+      allow get: if isValidId(docId) && isAgentAndOwner(resource.data);
+      allow list: if isAgentAndOwner(resource.data);
+      allow create: if isValidId(docId) && isAgentAndOwner(request.resource.data);
+      allow update: if isValidId(docId) && isAgentAndOwner(resource.data) && isAgentAndOwner(request.resource.data);
+      allow delete: if isValidId(docId) && isAgentAndOwner(resource.data);
+    }
+
+    match /automations/{docId} {
+      allow get: if isValidId(docId) && isAgentAndOwner(resource.data);
+      allow list: if isAgentAndOwner(resource.data);
+      allow create: if isValidId(docId) && isAgentAndOwner(request.resource.data);
+      allow update: if isValidId(docId) && isAgentAndOwner(resource.data) && isAgentAndOwner(request.resource.data);
+      allow delete: if isValidId(docId) && isAgentAndOwner(resource.data);
+    }
+    
+    match /appointments/{docId} {
+      allow get: if isValidId(docId) && isAgentAndOwner(resource.data);
+      allow list: if isAgentAndOwner(resource.data);
+      allow create: if isValidId(docId) && isAgentAndOwner(request.resource.data);
+      allow update: if isValidId(docId) && isAgentAndOwner(resource.data) && isAgentAndOwner(request.resource.data);
+      allow delete: if isValidId(docId) && isAgentAndOwner(resource.data);
+    }
+    match /users/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && docId == request.auth.uid;
+    }
+    
+    match /settings/{docId} {
+      allow read, write: if isSignedIn() && docId == request.auth.uid;
+    }
+    
+    match /integrations/{docId} {
+      allow read, write: if isSignedIn() && docId == request.auth.uid;
+    }
+    
+    match /teamInvitations/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == request.resource.data.ownerId || request.resource.data.ownerId == null);
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.ownerId;
     }
   }
 }

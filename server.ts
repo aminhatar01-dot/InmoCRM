@@ -209,7 +209,7 @@ async function startServer() {
   });
 
 // En memoria para esta demo/applet
-const waSessions: Record<string, { status: string; qr?: string; pairingCode?: string; method?: string; phone?: string; reason?: string }> = {};
+const waSessions: Record<string, { status: string; qr?: string; pairingCode?: string; method?: string; phone?: string; reason?: string; sock?: any }> = {};
 
 app.post('/api/whatsapp/connect', async (req, res) => {
 const startWhatsApp = async (userId: string, overrideMethod?: 'qr' | 'phone', overridePhone?: string) => {
@@ -226,6 +226,8 @@ const startWhatsApp = async (userId: string, overrideMethod?: 'qr' | 'phone', ov
       printQRInTerminal: false,
       browser: ['Ubuntu', 'Chrome', '10.0.0'],
     });
+    
+    waSessions[userId] = { ...waSessions[userId], sock };
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -282,6 +284,23 @@ const startWhatsApp = async (userId: string, overrideMethod?: 'qr' | 'phone', ov
   try {
     const { method, phone, userId } = req.body; // method: 'qr' | 'phone'
     if (!userId) return res.status(400).json({ error: 'User ID required' });
+
+    // Verificar si el agente puede usar automatizaciones (si pago subscripcion)
+    if (adminApp && firebaseConfig.firestoreDatabaseId) {
+      const db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
+      const userRef = await db.collection("users").doc(userId).get();
+      if (userRef.exists) {
+         const profile = userRef.data();
+         if (profile?.subscription) {
+            const { status, trialEndsAt, gracePeriodEndsAt } = profile.subscription;
+             const isTrialExpired = status === 'trial' && Date.now() > trialEndsAt;
+             const isGraceExpired = status === 'past_due' && gracePeriodEndsAt && Date.now() > gracePeriodEndsAt;
+             if (isTrialExpired || isGraceExpired || status === 'canceled') {
+                return res.status(403).json({ error: 'Suscripción expirada. No puedes conectar WhatsApp.' });
+             }
+         }
+      }
+    }
 
     // Si había una petición para conectar nuevamente, limpiamos el estado anterior para empezar fresco en caso de error
     const authFolder = `wa_auth_${userId}`;
@@ -467,6 +486,53 @@ app.get('/api/whatsapp/status/:userId', (req, res) => {
       res.status(500).json({ error: err.message || 'Error generating content' });
     }
   });
+
+  // Procesador de Cola de WhatsApp (Baileys) (Cada minuto)
+  setInterval(async () => {
+    try {
+      if (!adminApp || !firebaseConfig.firestoreDatabaseId) return;
+      const db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
+      
+      const snapshot = await db.collection('whatsappQueue').where('status', '==', 'pending').limit(20).get();
+      if (snapshot.empty) return;
+      
+      for (const doc of snapshot.docs) {
+        const item = doc.data();
+        const agentSession = waSessions[item.agentId];
+        
+        // Verificar Subscripcion activa antes de automatizar
+        const profileSnap = await db.collection("users").doc(item.agentId).get();
+        if (profileSnap.exists) {
+           const sub = profileSnap.data()?.subscription;
+           if (sub) {
+             const isTrialExpired = sub.status === 'trial' && Date.now() > sub.trialEndsAt;
+             const isGraceExpired = sub.status === 'past_due' && sub.gracePeriodEndsAt && Date.now() > sub.gracePeriodEndsAt;
+             if (isTrialExpired || isGraceExpired || sub.status === 'canceled') {
+                continue; // Saltar porque la cuenta esta bloqueada
+             }
+           }
+        }
+        
+        if (agentSession && agentSession.status === 'connected' && agentSession.sock) {
+           try {
+             let jid = item.clientPhone.replace(/[^0-9]/g, '');
+             // Si es argentino aseguramos el 9
+             if (jid.startsWith('54') && !jid.startsWith('549')) jid = jid.replace('54', '549');
+             if (!jid.includes('@')) jid = `${jid}@s.whatsapp.net`;
+             
+             await agentSession.sock.sendMessage(jid, { text: item.message });
+             await doc.ref.update({ status: 'sent', sentAt: Date.now() });
+             console.log(`[WhatsApp Queue] Mensaje enviado a ${jid} (Agente: ${item.agentId})`);
+           } catch (e: any) {
+             console.error(`[WhatsApp Queue] Error en doc ${doc.id}:`, e);
+             await doc.ref.update({ status: 'error', error: e.message || String(e) });
+           }
+        }
+      }
+    } catch (e) {
+      console.error("Error process whatsapp queue", e);
+    }
+  }, 60000);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
