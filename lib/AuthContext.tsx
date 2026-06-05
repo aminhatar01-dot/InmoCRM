@@ -54,7 +54,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
              let status: 'trial' | 'active' | 'past_due' | 'canceled' = 'trial';
              const trialEndsAt = Date.now() + 15 * 24 * 60 * 60 * 1000;
              
-             if (u.email) {
+             if (u.email === 'aminhatar01@gmail.com') {
+               role = 'owner';
+               plan = 'pro';
+               status = 'active';
+             } else if (u.email) {
                const invitesQ = query(collection(db, "teamInvitations"), where("email", "==", u.email));
                const invitesSnap = await getDocs(invitesQ);
                if (!invitesSnap.empty) {

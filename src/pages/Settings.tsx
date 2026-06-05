@@ -9,22 +9,26 @@ import { Bell, Mail, MonitorSmartphone, MousePointer2, UserCircle2, KeyRound, Cr
 import { useAuth } from "@/lib/AuthContext";
 import { db, auth } from "@/lib/firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc } from "firebase/firestore";
-import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
+import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential, sendPasswordResetEmail } from "firebase/auth";
 
 export function Settings() {
   const { user, userProfile } = useAuth();
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
   const [message, setMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
 
   // Perfil State
   const [displayName, setDisplayName] = useState("");
   const [photoURL, setPhotoURL] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
 
   // Contraseña State
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // Equipo State
   const [inviteEmail, setInviteEmail] = useState("");
@@ -47,6 +51,14 @@ export function Settings() {
       setPhotoURL(user.photoURL || "");
 
       try {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          setPhoneNumber(userData.phoneNumber || "");
+          setContactEmail(userData.contactEmail || user.email || "");
+          setPhotoURL(userData.photoURL || user.photoURL || "");
+        }
+
         const docRef = doc(db, "settings", user.uid);
         const docSnap = await getDoc(docRef);
         
@@ -83,7 +95,7 @@ export function Settings() {
       const invitesSnap = await getDocs(invitesQ);
       setInvitations(invitesSnap.docs.map(d => ({id: d.id, ...d.data()})));
     } catch (e) {
-      console.error(e);
+      console.error("Error loading team/invitations:", e);
     } finally {
       setLoadingTeam(false);
     }
@@ -128,17 +140,44 @@ export function Settings() {
     if (!user) return;
     setSaving(true);
     try {
-      await updateProfile(user, { displayName, photoURL });
+      const isDataUrl = photoURL.startsWith('data:');
+      
+      // Update Firebase Auth profile only with non-data URLs to avoid length limits
+      if (!isDataUrl && photoURL !== user.photoURL) {
+         await updateProfile(user, { displayName, photoURL });
+      } else if (displayName !== user.displayName) {
+         await updateProfile(user, { displayName });
+      }
       
       const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { displayName, photoURL });
+      await setDoc(userRef, { displayName, photoURL, phoneNumber, contactEmail }, { merge: true });
       
       setMessage({ type: 'success', text: 'Perfil actualizado correctamente.' });
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Error al actualizar perfil.' });
+    } catch (e: any) {
+      console.error(e);
+      setMessage({ type: 'error', text: 'Error al actualizar perfil: ' + e.message });
     } finally {
       setSaving(false);
       setTimeout(() => setMessage(null), 3000);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!user || !user.email) return;
+    setResettingPassword(true);
+    try {
+      await sendPasswordResetEmail(auth, user.email);
+      setMessage({ type: 'success', text: `Correo de recuperación enviado a ${user.email}. Por favor, revisa tu bandeja de entrada y la carpeta de SPAM (Correo no deseado).` });
+    } catch (e: any) {
+      console.error(e);
+      let errorText = e.message;
+      if (e.code === 'auth/operation-not-allowed') {
+        errorText = 'La autenticación por correo no está habilitada. Habilita "Email/Password" en la consola de Firebase > Authentication > Sign-in method.';
+      }
+      setMessage({ type: 'error', text: 'Error al enviar recuperación: ' + errorText });
+    } finally {
+      setResettingPassword(false);
+      setTimeout(() => setMessage(null), 8000); 
     }
   };
 
@@ -146,18 +185,70 @@ export function Settings() {
     if (!user || !user.email) return;
     setSaving(true);
     try {
+      if (!currentPassword) {
+        throw new Error('Debes ingresar tu contraseña actual para cambiarla. Si la olvidaste, usa "Restablecer por Correo".');
+      }
+      if (!newPassword || newPassword.length < 6) {
+        throw new Error('La nueva contraseña debe tener al menos 6 caracteres.');
+      }
+
       const credential = EmailAuthProvider.credential(user.email, currentPassword);
       await reauthenticateWithCredential(user, credential);
       await updatePassword(user, newPassword);
+
       setCurrentPassword("");
       setNewPassword("");
-      setMessage({ type: 'success', text: 'Contraseña actualizada.' });
-    } catch (e) {
+      setMessage({ type: 'success', text: 'Contraseña actualizada exitosamente.' });
+    } catch (e: any) {
       console.error(e);
-      setMessage({ type: 'error', text: 'Error: Verifica tu contraseña actual o vuelve a iniciar sesión.' });
+      let errorText = e.message;
+      if (e.code === 'auth/invalid-credential') {
+        errorText = 'La contraseña actual es incorrecta.';
+      } else if (e.code === 'auth/operation-not-allowed') {
+        errorText = 'La autenticación por correo no está habilitada. Habilita "Email/Password" en la consola de Firebase > Authentication > Sign-in method.';
+      }
+      setMessage({ type: 'error', text: 'Error: ' + errorText });
     } finally {
       setSaving(false);
       setTimeout(() => setMessage(null), 4000);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const MAX_DIMENSION = 300; // Resize to max 300x300 for Firestore limit
+
+          if (width > height) {
+            if (width > MAX_DIMENSION) {
+              height *= MAX_DIMENSION / width;
+              width = MAX_DIMENSION;
+            }
+          } else {
+            if (height > MAX_DIMENSION) {
+              width *= MAX_DIMENSION / height;
+              height = MAX_DIMENSION;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            setPhotoURL(dataUrl);
+          }
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -219,12 +310,27 @@ export function Settings() {
                 <Label>Nombre Completo</Label>
                 <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
               </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Teléfono de Contacto Públic</Label>
+                  <Input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="+54 9 11 1234-5678" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Correo de Contacto</Label>
+                  <Input value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} type="email" placeholder="contacto@inmobiliaria.com" />
+                </div>
+              </div>
+
               <div className="space-y-2">
-                <Label>URL Foto de Perfil</Label>
-                <Input value={photoURL} onChange={(e) => setPhotoURL(e.target.value)} placeholder="https://..." />
+                <Label>Foto de Perfil</Label>
+                <Input type="file" accept="image/*" onChange={handleFileChange} />
                 {photoURL && (
                   <div className="mt-4 flex items-center gap-4">
                     <img src={photoURL} alt="Preview" className="w-16 h-16 rounded-full object-cover border" />
+                    <Button variant="ghost" size="sm" onClick={() => setPhotoURL("")} className="text-red-500 hover:text-red-700 hover:bg-red-50">
+                      Eliminar Foto
+                    </Button>
                   </div>
                 )}
               </div>
@@ -239,20 +345,33 @@ export function Settings() {
           <Card>
             <CardHeader>
               <CardTitle>Cambiar Contraseña</CardTitle>
-              <CardDescription>Si usaste Google para iniciar sesión, deberás hacer esto desde tu cuenta de Google.</CardDescription>
+              <CardDescription>
+                Por razones de seguridad la contraseña actual no se puede mostrar visiblemente. 
+                Si la olvidaste, utiliza la opción de recuperación por correo.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Contraseña Actual</Label>
-                <Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+                <div className="relative">
+                  <Input type={showPassword ? "text" : "password"} value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Nueva Contraseña</Label>
-                <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+                <div className="relative">
+                  <Input type={showPassword ? "text" : "password"} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 text-sm font-medium">
+                    {showPassword ? "Ocultar" : "Mostrar"}
+                  </button>
+                </div>
               </div>
             </CardContent>
-            <CardFooter>
-              <Button onClick={handleUpdatePassword} disabled={saving || !currentPassword || !newPassword}>Actualizar Contraseña</Button>
+            <CardFooter className="flex justify-between items-center bg-slate-50 border-t p-4 rounded-b-xl">
+              <Button variant="outline" onClick={handleResetPassword} disabled={resettingPassword}>
+                Restablecer por Correo
+              </Button>
+              <Button onClick={handleUpdatePassword} disabled={saving || !newPassword}>Actualizar Contraseña</Button>
             </CardFooter>
           </Card>
         </TabsContent>

@@ -6,7 +6,7 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import * as dotenv from 'dotenv';
 import cron from 'node-cron';
-import * as admin from 'firebase-admin';
+import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import nodemailer from 'nodemailer';
@@ -31,6 +31,9 @@ try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(configPath)) {
     firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    console.log('[Init] Loaded firebase config with projectId:', firebaseConfig.projectId);
+  } else {
+    console.warn('[Init] firebase-applet-config.json not found at', configPath);
   }
 } catch (e) {
   console.log('Could not load firebase-applet-config.json:', e);
@@ -39,20 +42,96 @@ try {
 // Initialize Firebase Admin (Relies on default credentials in prod, acts as stub if none provided locally)
 let adminApp: admin.app.App | null = null;
 try {
-  if (firebaseConfig.projectId && !admin.apps.length) {
-    adminApp = admin.initializeApp({
-      projectId: firebaseConfig.projectId
-    });
+  if (firebaseConfig.projectId) {
+    if (!admin.apps.length) {
+      adminApp = admin.initializeApp({
+        projectId: firebaseConfig.projectId
+      });
+      console.log('[Init] Initialized adminApp with projectId');
+    } else {
+      adminApp = admin.app();
+      console.log('[Init] Used existing adminApp');
+    }
+  } else {
+    console.log('[Init] Skipped admin sdk init: no projectId in config');
   }
 } catch (e) {
   console.warn('Failed to initialize Firebase Admin:', e);
 }
+
+// Nodemailer config for password confirmation
+const getMailer = () => {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.ethereal.email',
+    port: parseInt(process.env.SMTP_PORT || '587'),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: {
+       user: process.env.SMTP_USER || 'fake_user',
+       pass: process.env.SMTP_PASS || 'fake_pass',
+    }
+  });
+};
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
   
   app.use(express.json());
+
+  /* app.get('/api/debug-env', (req, res) => {
+    res.json({
+      cwd: process.cwd(),
+      configPath: path.join(process.cwd(), 'firebase-applet-config.json'),
+      configExists: fs.existsSync(path.join(process.cwd(), 'firebase-applet-config.json')),
+      firebaseConfig,
+      adminAppIsNull: adminApp === null,
+      adminAppsLength: admin.apps.length
+    });
+  });
+
+  app.post('/api/user/change-password', async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      
+      if (!adminApp) {
+        return res.status(500).json({ error: 'Admin SDK not initialized' });
+      }
+
+      const token = authHeader.split('Bearer ')[1];
+      const decoded = await admin.auth(adminApp).verifyIdToken(token);
+      
+      const { newPassword } = req.body;
+      if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+
+      await admin.auth(adminApp).updateUser(decoded.uid, {
+        password: newPassword
+      });
+
+      // Simulate sending confirmation email
+      try {
+        const transporter = getMailer();
+        await transporter.sendMail({
+           from: '"Soporte" <soporte@inmobiliaria.com>',
+           to: decoded.email,
+           subject: 'Confirmación: Cambio de Contraseña Exitoso',
+           text: 'Tu contraseña ha sido actualizada exitosamente desde el panel de configuración.'
+        });
+        console.log(`Correo de confirmación enviado a: ${decoded.email}`);
+      } catch(emailErr) {
+        console.log(`Aviso: No se pudo enviar el email real (falta SMTP real), pero la clave se cambió. Error: ${emailErr}`);
+      }
+
+      res.status(200).json({ success: true, message: 'Password updated' });
+    } catch (e: any) {
+      console.error('Error changing password:', e);
+      res.status(500).json({ error: e.message });
+    }
+  }); */
 
   // Tarea Cron (Se ejecuta diariamente a las 09:00 AM)
   cron.schedule('0 9 * * *', async () => {
@@ -529,8 +608,12 @@ app.get('/api/whatsapp/status/:userId', (req, res) => {
            }
         }
       }
-    } catch (e) {
-      console.error("Error process whatsapp queue", e);
+    } catch (e: any) {
+      if (e.code === 7 || (e.message && e.message.includes('PERMISSION_DENIED'))) {
+        console.warn("[WhatsApp Queue] Skipping queue processing due to missing permission credentials in this host environment.");
+      } else {
+        console.error("Error process whatsapp queue", e);
+      }
     }
   }, 60000);
 
