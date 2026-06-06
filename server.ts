@@ -10,6 +10,7 @@ import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import nodemailer from 'nodemailer';
+import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
 
 dotenv.config();
 
@@ -199,8 +200,12 @@ async function startServer() {
           console.error(`Error enviando email al agente ${agentId}:`, mailErr);
         }
       }
-    } catch (err) {
-      console.error('Error durante la verificación de leads en cron job:', err);
+    } catch (err: any) {
+      if (err.code === 7 || (err.message && err.message.includes('PERMISSION_DENIED'))) {
+        console.warn("[Cron] Skipping leads check due to missing permission credentials in this host environment.");
+      } else {
+        console.error('Error durante la verificación de leads en cron job:', err);
+      }
     }
   });
 
@@ -282,8 +287,12 @@ async function startServer() {
         await batch.commit();
         console.log(`Se procesaron ${processed} leads inactivos y se agregaron a la cola de seguimiento de WhatsApp.`);
       }
-    } catch (err) {
-      console.error('Error durante la verificación de leads inactivos en cron job:', err);
+    } catch (err: any) {
+      if (err.code === 7 || (err.message && err.message.includes('PERMISSION_DENIED'))) {
+        console.warn("[Cron] Skipping inactive leads check due to missing permission credentials in this host environment.");
+      } else {
+        console.error('Error durante la verificación de leads inactivos en cron job:', err);
+      }
     }
   });
 
@@ -423,6 +432,99 @@ app.get('/api/whatsapp/status/:userId', (req, res) => {
   }
   res.json(session);
 });
+
+  // ========== MERCADO PAGO INTEGRATION ==========
+  const getMPClient = () => {
+    const token = process.env.MERCADOPAGO_ACCESS_TOKEN || "APP_USR-1747214109303653-060614-5e0fd826e5bc7e2049d72e56878cb2fb-814682618";
+    if (!token) return null;
+    return new MercadoPagoConfig({ accessToken: token });
+  };
+
+  app.post('/api/mercadopago/preference', async (req, res) => {
+    try {
+      const { plan, userId, userEmail } = req.body;
+      const client = getMPClient();
+      if (!client) {
+        return res.status(500).json({ error: 'MercadoPago ACCESS_TOKEN no configurado en el servidor (.env)' });
+      }
+
+      const numPrice = plan === 'plus' ? 29000 : 49000;
+
+      const preference = new Preference(client);
+      const appUrl = (req.headers.origin || req.protocol + '://' + req.get('host')).replace(/\/$/, "");
+
+      const result = await preference.create({
+        body: {
+          items: [
+            {
+              id: 'inmocrm_' + plan,
+              title: `Suscripción Mensual - Plan ${plan.toUpperCase()}`,
+              quantity: 1,
+              unit_price: numPrice,
+              currency_id: 'ARS',
+            }
+          ],
+          payer: {
+            email: userEmail
+          },
+          metadata: {
+            // Note: MP snake-cases this on fetch to "user_id" wait...
+            // It actually preserves it sometimes. Let's send user_id directly to be safe
+            user_id: userId,
+            plan: plan
+          },
+          back_urls: {
+            success: `${appUrl}/settings?payment=success`,
+            failure: `${appUrl}/settings?payment=failure`,
+            pending: `${appUrl}/settings?payment=pending`
+          },
+          auto_return: 'approved',
+          notification_url: `${appUrl}/api/mercadopago/webhook`
+        }
+      });
+
+      res.json({ init_point: result.init_point });
+    } catch (e: any) {
+      console.error('Error MP Preference:', e);
+      res.status(500).json({ error: e.message || 'Error creando link de pago' });
+    }
+  });
+
+  app.post('/api/mercadopago/webhook', async (req, res) => {
+    try {
+      const { type, action, data } = req.body;
+      
+      if ((type === 'payment' || action === 'payment.created') && data && data.id) {
+        const client = getMPClient();
+        if (client && adminApp && firebaseConfig.firestoreDatabaseId) {
+          const paymentClient = new Payment(client);
+          const paymentInfo = await paymentClient.get({ id: data.id });
+          
+          if (paymentInfo.status === 'approved' && paymentInfo.metadata) {
+             const { user_id: userId, plan } = paymentInfo.metadata;
+             
+             if (userId) {
+               const db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
+               const userRef = db.collection('users').doc(userId);
+               
+               await userRef.update({
+                 'subscription.status': 'active',
+                 'subscription.plan': plan,
+                 'subscription.currentPeriodEnd': Date.now() + 30 * 24 * 60 * 60 * 1000 // +30 days
+               });
+               console.log(`[MercadoPago] Suscripción activada para el usuario ${userId} (${plan})`);
+             }
+          }
+        }
+      }
+      res.sendStatus(200);
+    } catch (e) {
+      console.error('[MercadoPago] Webhook Error:', e);
+      res.sendStatus(500);
+    }
+  });
+  // ==============================================
+
   app.get('/api/webhook/whatsapp', (req, res) => {
     const verify_token = process.env.WHATSAPP_VERIFY_TOKEN || "inmocrm_webhook_token";
     const mode = req.query["hub.mode"];

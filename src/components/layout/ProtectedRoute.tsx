@@ -22,7 +22,7 @@ export function ProtectedRoute() {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center gap-4">
         <div className="text-slate-500">Iniciando perfil...</div>
-        <Button variant="outline" onClick={() => signOut(auth)}>Cerrar Sesión</Button>
+        <Button variant="outline" onClick={async () => { await signOut(auth); window.location.href='/login'; }}>Cerrar Sesión</Button>
       </div>
     );
   }
@@ -42,7 +42,7 @@ export function ProtectedRoute() {
         </p>
         <div className="flex gap-4">
           <Button onClick={() => window.location.href = '/settings'} className="bg-blue-600 hover:bg-blue-700">Ver Planes</Button>
-          <Button variant="outline" onClick={() => signOut(auth)}>Cerrar Sesión</Button>
+          <Button variant="outline" onClick={async () => { await signOut(auth); window.location.href='/login'; }}>Cerrar Sesión</Button>
         </div>
       </div>
     );

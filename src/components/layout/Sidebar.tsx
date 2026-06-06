@@ -39,6 +39,7 @@ export function Sidebar() {
     e.preventDefault();
     try {
       await signOut(auth);
+      navigate("/login", { replace: true });
     } catch (error) {
       console.error("Error signing out:", error);
       navigate("/login", { replace: true });

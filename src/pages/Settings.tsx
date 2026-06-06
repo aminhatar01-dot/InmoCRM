@@ -45,6 +45,17 @@ export function Settings() {
   });
 
   useEffect(() => {
+    // Check URL for payment status
+    const params = new URLSearchParams(window.location.search);
+    const paymentStatus = params.get('payment');
+    if (paymentStatus === 'success') {
+       setMessage({ type: 'success', text: '¡Pago exitoso! Tu suscripción se ha actualizado temporalmente, si el nivel del plan no cambia de inmediato refresca la página en unos minutos. ¡Gracias! '});
+    } else if (paymentStatus === 'failure') {
+       setMessage({ type: 'error', text: 'El pago no pudo procesarse. Por favor, intenta de nuevo.'});
+    } else if (paymentStatus === 'pending') {
+       setMessage({ type: 'success', text: 'El pago está pendiente de aprobación.'});
+    }
+
     async function loadSettings() {
       if (!user) return;
       setDisplayName(user.displayName || "");
@@ -270,10 +281,28 @@ export function Settings() {
     }
   };
 
-  // MercadoPago Links (Se pueden configurar con los enlaces de pago generados en ML)
-  const PLAN_LINKS = {
-    plus: "https://link.mercadopago.com.ar/tu_link_plus", // Cambiar por link real
-    pro: "https://link.mercadopago.com.ar/tu_link_pro"    // Cambiar por link real
+  const handleSubscribe = async (plan: 'plus' | 'pro') => {
+    if (!user) return;
+    try {
+      const res = await fetch('/api/mercadopago/preference', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan,
+          userId: user.uid,
+          userEmail: user.email
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al generar pago');
+      if (data.init_point) {
+        window.open(data.init_point, "_blank");
+      }
+    } catch (e: any) {
+      console.error(e);
+      setMessage({ type: 'error', text: 'Error iniciando Mercado Pago: ' + e.message });
+      setTimeout(() => setMessage(null), 5000);
+    }
   };
 
   if (loading) return <div className="p-8 text-slate-500">Cargando configuración...</div>;
@@ -430,7 +459,7 @@ export function Settings() {
               <CardHeader>
                 <CardTitle>Plan Plus Personal</CardTitle>
                 <CardDescription>Para agentes individuales activos</CardDescription>
-                <div className="mt-4 font-bold text-3xl">$1 ARS<span className="text-sm text-slate-500 font-normal">/mes</span></div>
+                <div className="mt-4 font-bold text-3xl">$29.000 ARS<span className="text-sm text-slate-500 font-normal">/mes</span></div>
               </CardHeader>
               <CardContent className="space-y-3 font-medium text-sm">
                 <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green-500"/> Acceso total al CRM</div>
@@ -441,7 +470,7 @@ export function Settings() {
                 {userProfile?.subscription?.plan === 'plus' ? (
                   <Button className="w-full" disabled variant="outline">Plan Actual</Button>
                 ) : (
-                  <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => window.open(PLAN_LINKS.plus, "_blank")}>
+                  <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => handleSubscribe('plus')}>
                     Subscribirse a Plus
                   </Button>
                 )}
@@ -452,7 +481,7 @@ export function Settings() {
               <CardHeader>
                 <CardTitle className="text-indigo-700">Plan Pro (Team)</CardTitle>
                 <CardDescription>Inmobiliarias: Invita hasta 10 colegas gratis</CardDescription>
-                <div className="mt-4 font-bold text-3xl">$3 ARS<span className="text-sm text-slate-500 font-normal">/mes</span></div>
+                <div className="mt-4 font-bold text-3xl">$49.000 ARS<span className="text-sm text-slate-500 font-normal">/mes</span></div>
               </CardHeader>
               <CardContent className="space-y-3 font-medium text-sm">
                 <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green-500"/> Todas las ventajas de Plus</div>
@@ -463,7 +492,7 @@ export function Settings() {
                 {userProfile?.subscription?.plan === 'pro' ? (
                   <Button className="w-full" disabled variant="outline">Plan Actual</Button>
                 ) : (
-                  <Button className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={() => window.open(PLAN_LINKS.pro, "_blank")}>
+                  <Button className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={() => handleSubscribe('pro')}>
                     Adquirir Plan Pro
                   </Button>
                 )}
