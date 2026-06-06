@@ -299,7 +299,6 @@ async function startServer() {
 // En memoria para esta demo/applet
 const waSessions: Record<string, { status: string; qr?: string; pairingCode?: string; method?: string; phone?: string; reason?: string; sock?: any }> = {};
 
-app.post('/api/whatsapp/connect', async (req, res) => {
 const startWhatsApp = async (userId: string, overrideMethod?: 'qr' | 'phone', overridePhone?: string) => {
     const authFolder = `wa_auth_${userId}`;
     const method = overrideMethod || waSessions[userId]?.method;
@@ -318,6 +317,52 @@ const startWhatsApp = async (userId: string, overrideMethod?: 'qr' | 'phone', ov
     waSessions[userId] = { ...waSessions[userId], sock };
 
     sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('messages.upsert', async (m) => {
+      const msg = m.messages[0];
+      if (!msg.message || msg.key.fromMe) return;
+
+      const phoneNumber = msg.key.remoteJid?.split('@')[0];
+      const messageText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+
+      if (!phoneNumber || !messageText) return;
+
+      console.log(`[Baileys] Mensaje recibido de ${phoneNumber}: ${messageText}`);
+
+      try {
+        if (!adminApp || !firebaseConfig.firestoreDatabaseId) return;
+        const db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
+
+        let q = db.collection('clients').where('phone', '==', phoneNumber);
+        let snapshot = await q.get();
+
+        if (snapshot.empty) {
+          q = db.collection('clients').where('phone', '==', `+${phoneNumber}`);
+          snapshot = await q.get();
+        }
+
+        if (!snapshot.empty) {
+          const batch = db.batch();
+          for (const doc of snapshot.docs) {
+            const leadData = doc.data();
+            const updateData: any = {};
+            
+            if (leadData.status === 'nuevo') {
+              updateData.status = 'contactado';
+            }
+            
+            const currentNotes = leadData.notes || '';
+            updateData.notes = `${currentNotes}\n\n[Mensaje WhatsApp ${new Date().toLocaleString()}]: ${messageText}`.trim();
+            
+            batch.update(doc.ref, updateData);
+            console.log(`Lead ${doc.id} actualizado por respuesta de WhatsApp.`);
+          }
+          await batch.commit();
+        }
+      } catch (err) {
+        console.error('Error procesando mensaje entrante de Baileys:', err);
+      }
+    });
 
     sock.ev.on('connection.update', async (update) => {
       const { connection, qr } = update;
@@ -367,8 +412,27 @@ const startWhatsApp = async (userId: string, overrideMethod?: 'qr' | 'phone', ov
     }
     
     return sock;
-  };
+};
 
+// Función de Auto-Hidratación de sesiones persistentes en disco
+const restoreSessions = () => {
+  try {
+    const files = fs.readdirSync(process.cwd());
+    const authFolders = files.filter(f => f.startsWith('wa_auth_') && fs.statSync(f).isDirectory());
+    for (const folder of authFolders) {
+      const userId = folder.replace('wa_auth_', '');
+      console.log(`[Auto-Hydration] Restoring WhatsApp session for user: ${userId}`);
+      waSessions[userId] = { status: 'starting', method: 'qr' }; 
+      startWhatsApp(userId);
+    }
+  } catch (err) {
+    console.error('Error reading dir for auto-hydration:', err);
+  }
+};
+
+restoreSessions();
+
+app.post('/api/whatsapp/connect', async (req, res) => {
   try {
     const { method, phone, userId } = req.body; // method: 'qr' | 'phone'
     if (!userId) return res.status(400).json({ error: 'User ID required' });
@@ -435,7 +499,7 @@ app.get('/api/whatsapp/status/:userId', (req, res) => {
 
   // ========== MERCADO PAGO INTEGRATION ==========
   const getMPClient = () => {
-    const token = process.env.MERCADOPAGO_ACCESS_TOKEN || "APP_USR-1747214109303653-060614-5e0fd826e5bc7e2049d72e56878cb2fb-814682618";
+    const token = process.env.MERCADOPAGO_ACCESS_TOKEN || "APP_USR-1747214109303653-060614-841518725d5cc7f41eacf95c8a4a2250-814682618";
     if (!token) return null;
     return new MercadoPagoConfig({ accessToken: token });
   };
@@ -525,89 +589,7 @@ app.get('/api/whatsapp/status/:userId', (req, res) => {
   });
   // ==============================================
 
-  app.get('/api/webhook/whatsapp', (req, res) => {
-    const verify_token = process.env.WHATSAPP_VERIFY_TOKEN || "inmocrm_webhook_token";
-    const mode = req.query["hub.mode"];
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
 
-    if (mode && token) {
-      if (mode === "subscribe" && token === verify_token) {
-        console.log("WEBHOOK_VERIFIED");
-        res.status(200).send(challenge);
-      } else {
-        res.sendStatus(403);
-      }
-    } else {
-      res.sendStatus(400);
-    }
-  });
-
-  // Endpoint para recibir mensajes vía Webhook de WhatsApp (POST)
-  app.post('/api/webhook/whatsapp', async (req, res) => {
-    try {
-      if (!adminApp || !firebaseConfig.firestoreDatabaseId) {
-        console.warn('Firebase no inicializado, webhook de WhatsApp ignorado');
-        return res.sendStatus(200);
-      }
-      
-      const db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
-
-      // Verificamos que contenga objeto (WhatsApp Business Cloud API)
-      if (req.body.object) {
-        if (
-          req.body.entry &&
-          req.body.entry[0].changes &&
-          req.body.entry[0].changes[0] &&
-          req.body.entry[0].changes[0].value.messages &&
-          req.body.entry[0].changes[0].value.messages[0]
-        ) {
-          const phoneNumber = req.body.entry[0].changes[0].value.messages[0].from; // El número desde el cual envían
-          const messageText = req.body.entry[0].changes[0].value.messages[0].text?.body || "Mensaje sin texto";
-
-          console.log(`Mensaje recibido de ${phoneNumber}: ${messageText}`);
-
-          // Buscar leads con ese número telefónico
-          // Se busca como llegó, o agregándole un '+' al inicio, dependiendo de cómo se guardó
-          let q = db.collection('clients').where('phone', '==', phoneNumber);
-          let snapshot = await q.get();
-
-          if (snapshot.empty) {
-            q = db.collection('clients').where('phone', '==', `+${phoneNumber}`);
-            snapshot = await q.get();
-          }
-
-          if (!snapshot.empty) {
-            const batch = db.batch();
-            for (const doc of snapshot.docs) {
-              const leadData = doc.data();
-              const updateData: any = {};
-              
-              // Cambiar estado a 'contactado' si estaba en 'nuevo'
-              if (leadData.status === 'nuevo') {
-                updateData.status = 'contactado';
-              }
-              
-              const currentNotes = leadData.notes || '';
-              updateData.notes = `${currentNotes}\n\n[Mensaje WhatsApp ${new Date().toLocaleString()}]: ${messageText}`.trim();
-              
-              batch.update(doc.ref, updateData);
-              console.log(`Lead ${doc.id} actualizado por respuesta de WhatsApp.`);
-            }
-            await batch.commit();
-          } else {
-            console.log(`Lead no encontrado para el número de remitente: ${phoneNumber}`);
-          }
-        }
-        res.sendStatus(200);
-      } else {
-        res.sendStatus(404);
-      }
-    } catch (e) {
-      console.error('Error procesando webhook de WhatsApp:', e);
-      res.sendStatus(500);
-    }
-  });
 
   app.post('/api/test-email', async (req, res) => {
     try {
