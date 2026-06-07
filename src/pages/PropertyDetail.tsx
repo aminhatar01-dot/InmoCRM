@@ -157,9 +157,16 @@ export function PropertyDetail() {
           </div>
         </div>
         
-        <div className="h-64 sm:h-96 w-full bg-slate-200 rounded-xl mb-8 flex items-center justify-center text-slate-400">
-           Sin imagen cargada
-        </div>
+        {property.images && property.images.length > 0 ? (
+          <img src={property.images[0]} alt={property.title} className="h-64 sm:h-96 w-full object-cover rounded-xl mb-8" />
+        ) : (
+          <iframe
+            title="Mapa de ubicación"
+            className="h-64 sm:h-96 w-full rounded-xl mb-8 border-0"
+            referrerPolicy="no-referrer-when-downgrade"
+            src={`https://maps.google.com/maps?q=${encodeURIComponent(property.address + (property.city ? ', ' + property.city : ''))}&z=15&output=embed`}
+          />
+        )}
         
         <div className="grid gap-8 md:grid-cols-3">
           <div className="md:col-span-2 space-y-8">

@@ -167,7 +167,12 @@ export function Explore() {
                    {prop.images && prop.images.length > 0 ? (
                      <img src={prop.images[0]} alt={prop.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                    ) : (
-                     "Sin imagen"
+                     <iframe
+                       title="Mapa"
+                       className="w-full h-full border-0"
+                       referrerPolicy="no-referrer-when-downgrade"
+                       src={`https://maps.google.com/maps?q=${encodeURIComponent(prop.address + (prop.city ? ', ' + prop.city : ''))}&z=14&output=embed`}
+                     />
                    )}
                    <Badge className="absolute top-3 left-3 shadow-md capitalize bg-blue-600 hover:bg-blue-700">
                      {prop.type}

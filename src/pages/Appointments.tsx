@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { db } from "@/lib/firebase";
+import { LoadingState } from "@/components/StateWrapper";
 import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, orderBy } from "firebase/firestore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ export function Appointments() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
 
   // Form state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -77,6 +79,7 @@ export function Appointments() {
       apptsData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       
       setAppointments(apptsData);
+      setLoadingData(false);
     } catch (error) {
       console.error("Error fetching data:", error);
     }
@@ -191,6 +194,10 @@ export function Appointments() {
       </div>
 
       <div className="grid gap-4">
+        {loadingData ? (
+          <LoadingState message="Cargando citas..." />
+        ) : (
+        <>
         {appointments.length === 0 ? (
           <div className="text-center py-12 text-slate-500">
             No tienes citas agendadas. Crea una nueva cita para comenzar.
@@ -235,6 +242,8 @@ export function Appointments() {
               </CardContent>
             </Card>
           ))
+        )}
+        </>
         )}
       </div>
 

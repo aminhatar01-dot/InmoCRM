@@ -16,6 +16,7 @@ export function Settings() {
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
   const [message, setMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
 
@@ -305,6 +306,31 @@ export function Settings() {
     }
   };
 
+  const handleCancelSubscription = async () => {
+    if (!user) return;
+    if (!confirm('¿Estás seguro de que deseas cancelar tu suscripción?')) return;
+    
+    setCanceling(true);
+    try {
+      const res = await fetch('/api/subscription/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.uid })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al cancelar la suscripción');
+      
+      setMessage({ type: 'success', text: 'Suscripción cancelada exitosamente.' });
+      setTimeout(() => window.location.reload(), 2000);
+    } catch (e: any) {
+      console.error(e);
+      setMessage({ type: 'error', text: 'Error al cancelar: ' + e.message });
+      setTimeout(() => setMessage(null), 5000);
+    } finally {
+      setCanceling(false);
+    }
+  };
+
   if (loading) return <div className="p-8 text-slate-500">Cargando configuración...</div>;
 
   return (
@@ -466,9 +492,14 @@ export function Settings() {
                 <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green-500"/> Automatizaciones con IA</div>
                 <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green-500"/> WhatsApp Bot Ilimitado</div>
               </CardContent>
-              <CardFooter>
+              <CardFooter className="flex-col gap-2">
                 {userProfile?.subscription?.plan === 'plus' ? (
-                  <Button className="w-full" disabled variant="outline">Plan Actual</Button>
+                  <>
+                    <Button className="w-full" disabled variant="outline">Plan Actual</Button>
+                    {userProfile?.subscription?.status !== 'canceled' && (
+                      <Button className="w-full text-red-600 hover:text-red-700 hover:bg-red-50" variant="ghost" onClick={handleCancelSubscription} disabled={canceling}>Cancelar Suscripción</Button>
+                    )}
+                  </>
                 ) : (
                   <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => handleSubscribe('plus')}>
                     Subscribirse a Plus
@@ -488,9 +519,14 @@ export function Settings() {
                 <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green-500"/> 10 Cuentas Invitadas Gratuitas</div>
                 <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green-500"/> Portafolio Compartido</div>
               </CardContent>
-              <CardFooter>
+              <CardFooter className="flex-col gap-2">
                 {userProfile?.subscription?.plan === 'pro' ? (
-                  <Button className="w-full" disabled variant="outline">Plan Actual</Button>
+                  <>
+                    <Button className="w-full" disabled variant="outline">Plan Actual</Button>
+                    {userProfile?.subscription?.status !== 'canceled' && (
+                      <Button className="w-full text-red-600 hover:text-red-700 hover:bg-red-50" variant="ghost" onClick={handleCancelSubscription} disabled={canceling}>Cancelar Suscripción</Button>
+                    )}
+                  </>
                 ) : (
                   <Button className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={() => handleSubscribe('pro')}>
                     Adquirir Plan Pro
@@ -566,7 +602,26 @@ export function Settings() {
                                <div className="text-xs text-slate-500">{member.email}</div>
                              </div>
                            </div>
-                           {/* Próximamente: suspender/remover agente */}
+                           <div className="flex gap-1">
+                             <Button
+                               variant="ghost" size="sm"
+                               className="text-amber-600 hover:text-amber-700 hover:bg-amber-50 h-8"
+                               onClick={async () => {
+                                 if (!confirm(`¿Suspender a ${member.displayName || member.email}?`)) return;
+                                 await updateDoc(doc(db, "users", member.id), { 'subscription.status': 'suspended' });
+                                 loadTeam();
+                               }}
+                             >Suspender</Button>
+                             <Button
+                               variant="ghost" size="sm"
+                               className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8"
+                               onClick={async () => {
+                                 if (!confirm(`¿Eliminar a ${member.displayName || member.email}?`)) return;
+                                 await deleteDoc(doc(db, "users", member.id));
+                                 loadTeam();
+                               }}
+                             ><Trash2 className="w-4 h-4" /></Button>
+                           </div>
                          </div>
                        ))}
                      </div>

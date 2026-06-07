@@ -1,14 +1,15 @@
 import { useState, useEffect } from "react";
+import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Search, MapPin, Share2, Edit2, Copy } from "lucide-react";
+import { Plus, Search, MapPin, Share2, Edit2, Copy, ImagePlus, X, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { db } from "@/lib/firebase";
+import { db, storage } from "@/lib/firebase";
 import { collection, addDoc, getDocs, onSnapshot, query, where, updateDoc, doc } from "firebase/firestore";
-import { useAuth } from "@/lib/AuthContext";
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { Property, PropertyStatus, PropertyType } from "@/src/types";
 
 function PropertyForm({ isOpen, setIsOpen, onSave, initialData }: any) {
@@ -21,6 +22,40 @@ function PropertyForm({ isOpen, setIsOpen, onSave, initialData }: any) {
   const [bedrooms, setBedrooms] = useState(initialData?.bedrooms || "");
   const [bathrooms, setBathrooms] = useState(initialData?.bathrooms || "");
   const [areaSqM, setAreaSqM] = useState(initialData?.areaSqM || "");
+  const [images, setImages] = useState<string[]>(initialData?.images || []);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const { user } = useAuth();
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !user) return;
+    setUploadingImages(true);
+    const newUrls: string[] = [...images];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const ext = file.name.split('.').pop() || 'jpg';
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const storageRef = ref(storage, `properties/${user.uid}/${filename}`);
+      const uploadTask = uploadBytesResumable(storageRef, file);
+      await new Promise<void>((resolve, reject) => {
+        uploadTask.on('state_changed',
+          (snapshot) => setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)),
+          reject,
+          async () => {
+            const url = await getDownloadURL(uploadTask.snapshot.ref);
+            newUrls.push(url);
+            resolve();
+          }
+        );
+      });
+    }
+    setImages(newUrls);
+    setUploadingImages(false);
+    setUploadProgress(0);
+    // Reset file input
+    e.target.value = '';
+  };
 
   const handleSaveData = async () => {
     let lat = initialData?.lat || 0;
@@ -51,7 +86,8 @@ function PropertyForm({ isOpen, setIsOpen, onSave, initialData }: any) {
       bathrooms: Number(bathrooms),
       areaSqM: Number(areaSqM),
       lat, 
-      lng 
+      lng,
+      images
     });
   };
 
@@ -119,6 +155,41 @@ function PropertyForm({ isOpen, setIsOpen, onSave, initialData }: any) {
           </div>
         </div>
 
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Imágenes de la Propiedad</label>
+          <div className="flex flex-wrap gap-2">
+            {images.map((url, i) => (
+              <div key={i} className="relative w-24 h-24 rounded-md overflow-hidden border">
+                <img src={url} alt={`Imagen ${i + 1}`} className="w-full h-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setImages(images.filter((_, j) => j !== i))}
+                  className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            <label className="w-24 h-24 border-2 border-dashed border-slate-300 rounded-md flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-colors">
+              {uploadingImages ? (
+                <>
+                  <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                  <span className="text-xs text-blue-500 mt-1">{uploadProgress}%</span>
+                </>
+              ) : (
+                <>
+                  <ImagePlus className="w-5 h-5 text-slate-400" />
+                  <span className="text-xs text-slate-400 mt-1">Agregar</span>
+                </>
+              )}
+              <input
+                type="file" accept="image/*" multiple className="hidden"
+                onChange={handleImageUpload} disabled={uploadingImages}
+              />
+            </label>
+          </div>
+        </div>
+
         <Button onClick={handleSaveData} className="w-full bg-blue-600 hover:bg-blue-700">
           Guardar Propiedad
         </Button>
@@ -164,7 +235,6 @@ export function Properties() {
         agentId: user.uid,
         status: "disponible",
         currency: "USD",
-        images: [],
         createdAt: Date.now(),
         updatedAt: Date.now()
       });
@@ -263,7 +333,11 @@ export function Properties() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {properties.map((prop) => (
             <Card key={prop.id} className="overflow-hidden">
-              <div className="h-48 bg-slate-200 flex items-center justify-center text-slate-400 text-sm">Sin imagen</div>
+              {prop.images && prop.images.length > 0 ? (
+                <img src={prop.images[0]} alt={prop.title} className="h-48 w-full object-cover" />
+              ) : (
+                <div className="h-48 bg-slate-200 flex items-center justify-center text-slate-400 text-sm">Sin imagen</div>
+              )}
               <CardContent className="p-4">
                 <div className="flex justify-between items-start mb-2">
                   <Badge variant={prop.status === "disponible" ? "default" : "secondary"} className={prop.status === "disponible" ? "bg-blue-600" : ""}>

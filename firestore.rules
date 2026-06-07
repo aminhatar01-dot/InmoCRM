@@ -56,6 +56,14 @@ service cloud.firestore {
       allow update: if isValidId(docId) && isAgentAndOwner(resource.data) && isAgentAndOwner(request.resource.data);
       allow delete: if isValidId(docId) && isAgentAndOwner(resource.data);
     }
+    
+    match /documentTemplates/{docId} {
+      allow get: if isValidId(docId) && isAgentAndOwner(resource.data);
+      allow list: if isAgentAndOwner(resource.data);
+      allow create: if isValidId(docId) && isAgentAndOwner(request.resource.data);
+      allow update: if isValidId(docId) && isAgentAndOwner(resource.data) && isAgentAndOwner(request.resource.data);
+      allow delete: if isValidId(docId) && isAgentAndOwner(resource.data);
+    }
     match /users/{docId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && docId == request.auth.uid;
@@ -65,6 +73,13 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && docId == request.auth.uid;
     }
     
+    match /messages/{docId} {
+      allow read: if isSignedIn() && resource.data.agentId == request.auth.uid;
+    }
+    match /conversations/{docId} {
+      allow read: if isSignedIn() && resource.data.agentId == request.auth.uid;
+    }
+
     match /integrations/{docId} {
       allow read, write: if isSignedIn() && docId == request.auth.uid;
     }

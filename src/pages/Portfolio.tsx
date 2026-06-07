@@ -145,7 +145,16 @@ export function Portfolio() {
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {properties.map((prop) => (
               <Card key={prop.id} className="overflow-hidden">
-                <div className="h-48 bg-slate-200 flex items-center justify-center text-slate-400 text-sm">Sin imagen</div>
+                {prop.images && prop.images.length > 0 ? (
+                  <img src={prop.images[0]} alt={prop.title} className="h-48 w-full object-cover" />
+                ) : (
+                  <iframe
+                    title="Mapa"
+                    className="h-48 w-full border-0"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    src={`https://maps.google.com/maps?q=${encodeURIComponent(prop.address + (prop.city ? ', ' + prop.city : ''))}&z=14&output=embed`}
+                  />
+                )}
                 <CardContent className="p-4">
                   <div className="flex justify-between items-start mb-2">
                     <Badge variant="default" className={prop.status === "disponible" ? "bg-blue-600" : "bg-slate-500"}>

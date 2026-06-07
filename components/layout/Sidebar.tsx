@@ -1,4 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { signOut } from "firebase/auth";
 import { 
   Building2, 
   Users, 
@@ -12,6 +14,7 @@ import {
   Megaphone,
   Menu
 } from "lucide-react";
+import { auth } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -31,6 +34,8 @@ export const menuItems = [
 
 export function SidebarContent({ onClickLink }: { onClickLink?: () => void }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const handleLogout = async () => { await signOut(auth); navigate("/login"); };
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -64,7 +69,7 @@ export function SidebarContent({ onClickLink }: { onClickLink?: () => void }) {
       </nav>
 
       <div className="p-4 border-t">
-        <button className="flex w-full items-center gap-3 px-3 py-2 rounded-md transition-colors text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900">
+        <button onClick={handleLogout} className="flex w-full items-center gap-3 px-3 py-2 rounded-md transition-colors text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900">
           <LogOut className="w-5 h-5 text-slate-400" />
           Cerrar Sesión
         </button>

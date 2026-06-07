@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Copy, Bot, Send, User, Reply, Search, FileText, MessageSquare, BotOff } from "lucide-react";
+import { Copy, Bot, Send, User, Reply, Search, FileText, MessageSquare, BotOff, Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 
@@ -23,6 +23,7 @@ interface Chat {
   lastMessageAt: Date;
   messages: Message[];
   aiPaused?: boolean;
+  unreadCount?: number;
 }
 
 export function Inbox() {
@@ -32,209 +33,297 @@ export function Inbox() {
   const [messageText, setMessageText] = useState("");
   const [templates, setTemplates] = useState<any[]>([]);
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Scroll to bottom when messages change
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeChat, chats]);
 
+  // Cargar conversaciones desde el backend y templates
   useEffect(() => {
     async function loadData() {
       if (!user) return;
-      
-      // Load templates for quick replies
-      const q = query(collection(db, "whatsappTemplates"), where("agentId", "==", user.uid));
-      const snap = await getDocs(q);
-      const tdata: any[] = [];
-      snap.forEach(d => tdata.push({ id: d.id, ...d.data() }));
-      setTemplates(tdata);
+      setLoading(true);
 
-      // check if AI is enabled
-      const settingsDoc = await getDoc(doc(db, "settings", user.uid));
-      if (settingsDoc.exists() && settingsDoc.data().aiEnabled) {
-        setAiEnabled(true);
-      }
+      try {
+        // Load templates for quick replies
+        const q = query(collection(db, "whatsappTemplates"), where("agentId", "==", user.uid));
+        const snap = await getDocs(q);
+        const tdata: any[] = [];
+        snap.forEach(d => tdata.push({ id: d.id, ...d.data() }));
+        setTemplates(tdata);
 
-      // Mock some chats for visualization
-      setChats([
-        {
-          id: "1",
-          clientName: "María López",
-          phone: "+54 9 11 1234-5678",
-          lastMessage: "¡Excelente! Me gustaría agendar una visita.",
-          lastMessageAt: new Date(Date.now() - 1000 * 60 * 5),
-          aiPaused: false,
-          messages: [
-            { id: "m1", text: "Hola, vi la casa en Palermo, ¿sigue disponible?", sender: "user", timestamp: new Date(Date.now() - 1000 * 60 * 60) },
-            { id: "m2", text: "¡Hola María! Sí, sigue disponible. Tiene 3 habitaciones y un patio amplio. ¿Te gustaría saber el precio o más detalles?", sender: "ai", timestamp: new Date(Date.now() - 1000 * 60 * 55) },
-            { id: "m3", text: "Me interesa verla. ¿Cuándo se puede?", sender: "user", timestamp: new Date(Date.now() - 1000 * 60 * 15) },
-            { id: "m4", text: "Podemos agendar para mañana por la tarde o el sábado a la mañana. ¿Qué día prefieres?", sender: "ai", timestamp: new Date(Date.now() - 1000 * 60 * 10) },
-            { id: "m5", text: "¡Excelente! Me gustaría agendar una visita para el sábado.", sender: "user", timestamp: new Date(Date.now() - 1000 * 60 * 5) }
-          ]
-        },
-        {
-          id: "2",
-          clientName: "Carlos Gómez",
-          phone: "+54 9 11 9876-5432",
-          lastMessage: "¿Aceptan mascotas?",
-          lastMessageAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
-          aiPaused: false,
-          messages: [
-            { id: "m1", text: "Me interesa el departamento de Belgrano.", sender: "user", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 3) },
-            { id: "m2", text: "¡Hola Carlos! Es una excelente opción. ¿Qué información te gustaría saber?", sender: "ai", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2.5) },
-            { id: "m3", text: "¿Aceptan mascotas?", sender: "user", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2) }
-          ]
+        // Check if AI is enabled
+        const settingsDoc = await getDoc(doc(db, "settings", user.uid));
+        if (settingsDoc.exists() && settingsDoc.data().aiEnabled) {
+          setAiEnabled(true);
         }
-      ]);
-      setActiveChat("1");
+
+        // Fetch real conversations
+        const res = await fetch(`/api/whatsapp/conversations/${user.uid}`);
+        if (res.ok) {
+          const convs = await res.json();
+          if (convs.length > 0) {
+            setChats(convs.map((c: any) => ({
+              id: c.id,
+              clientName: c.clientName || c.clientPhone,
+              phone: c.clientPhone,
+              lastMessage: c.lastMessage || '',
+              lastMessageAt: new Date(c.lastMessageAt || Date.now()),
+              messages: [],
+              aiPaused: c.aiPaused ?? false,
+              unreadCount: c.unreadCount ?? 0,
+            })));
+          }
+        }
+      } catch (e) {
+        console.error("Error loading inbox data:", e);
+      } finally {
+        setLoading(false);
+      }
     }
+
     loadData();
+    const interval = setInterval(loadData, 10000);
+    return () => clearInterval(interval);
   }, [user]);
 
-  const toggleAiStatus = (chatId: string) => {
-    setChats(chats.map(chat => {
-      if (chat.id === chatId) {
-        return {
-          ...chat,
-          aiPaused: !chat.aiPaused
-        };
-      }
-      return chat;
-    }));
-  };
+  // Cargar mensajes del chat activo
+  useEffect(() => {
+    if (!activeChat || !user) return;
+    const chat = chats.find(c => c.id === activeChat);
+    if (!chat) return;
 
-  const handleSendMessage = () => {
-    if (!messageText.trim() || !activeChat) return;
-    
-    setChats(chats.map(chat => {
-      if (chat.id === activeChat) {
-        return {
-          ...chat,
-          messages: [
-            ...chat.messages,
-            { id: Date.now().toString(), text: messageText, sender: "agent", timestamp: new Date() }
-          ],
-          lastMessage: messageText,
-          lastMessageAt: new Date(),
-          aiPaused: true // automatically pause AI when human agent intervenes
-        };
-      }
-      return chat;
-    }));
+    const fetchMessages = async () => {
+      try {
+        const res = await fetch(`/api/whatsapp/messages/${user.uid}/${encodeURIComponent(chat.phone)}`);
+        if (res.ok) {
+          const msgs = await res.json();
+          setChats(prev => prev.map(c =>
+            c.id === activeChat
+              ? {
+                  ...c,
+                  messages: msgs.map((m: any) => ({
+                    id: m.id || `msg-${m.timestamp}`,
+                    text: m.text,
+                    sender: m.direction === 'incoming' ? 'user' : 'agent',
+                    timestamp: new Date(m.timestamp),
+                  })),
+                }
+              : c
+          ));
+        }
+      } catch (e) { /* polling silently */ }
+    };
+
+    fetchMessages();
+    const interval = setInterval(fetchMessages, 5000);
+    return () => clearInterval(interval);
+  }, [activeChat, user]);
+
+  const handleSendMessage = async () => {
+    if (!messageText.trim() || !activeChat || !user) return;
+    const chat = chats.find(c => c.id === activeChat);
+    if (!chat) return;
+
+    const textToSend = messageText;
     setMessageText("");
+
+    // Optimistic update
+    const optimisticMsg: Message = {
+      id: `temp-${Date.now()}`,
+      text: textToSend,
+      sender: 'agent',
+      timestamp: new Date(),
+    };
+    setChats(prev => prev.map(c =>
+      c.id === activeChat ? { ...c, messages: [...c.messages, optimisticMsg], lastMessage: textToSend } : c
+    ));
+
+    try {
+      await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: user.uid, clientPhone: chat.phone, text: textToSend }),
+      });
+    } catch (e) {
+      console.error('Failed to send message', e);
+    }
   };
 
-  const handleSendTemplate = (content: string) => {
-    setMessageText(content);
+  const handleToggleAi = async () => {
+    if (!activeChat) return;
+    const chat = chats.find(c => c.id === activeChat);
+    if (!chat) return;
+
+    const newAiPaused = !chat.aiPaused;
+    setChats(prev => prev.map(c =>
+      c.id === activeChat ? { ...c, aiPaused: newAiPaused } : c
+    ));
+
+    try {
+      await fetch('/api/whatsapp/ai-toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: activeChat, aiPaused: newAiPaused }),
+      });
+    } catch (e) { console.error(e); }
   };
 
-  const currentChat = chats.find(c => c.id === activeChat);
+  const handleSendTemplate = async (templateContent: string) => {
+    if (!activeChat || !user) return;
+    const chat = chats.find(c => c.id === activeChat);
+    if (!chat) return;
+
+    // Optimistic
+    const optimisticMsg: Message = {
+      id: `temp-${Date.now()}`,
+      text: templateContent,
+      sender: 'agent',
+      timestamp: new Date(),
+    };
+    setChats(prev => prev.map(c =>
+      c.id === activeChat ? { ...c, messages: [...c.messages, optimisticMsg], lastMessage: templateContent } : c
+    ));
+
+    try {
+      await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: user.uid, clientPhone: chat.phone, text: templateContent }),
+      });
+    } catch (e) { console.error(e); }
+  };
+
+  const activeChatData = chats.find(c => c.id === activeChat);
 
   return (
-    <div className="h-[calc(100vh-6rem)] flex flex-col">
-      <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900">Mensajes y Chat</h2>
-          <p className="text-slate-500">
-            Gestiona conversaciones y supervisa las respuestas de la IA.
-          </p>
-        </div>
-        {aiEnabled && (
-          <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-medium border border-blue-100">
-            <Bot className="w-4 h-4" />
-            Asistente IA Activo
-          </div>
-        )}
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-3xl font-bold tracking-tight text-slate-900">Inbox</h2>
+        <p className="text-slate-500">WhatsApp conectado. Chats en tiempo real.</p>
       </div>
 
-      <div className="flex-1 border rounded-xl overflow-hidden bg-white flex shadow-sm">
+      <div className="grid md:grid-cols-12 gap-4 h-[calc(100vh-180px)] min-h-[600px]">
         {/* Chat List */}
-        <div className="w-1/3 border-r flex flex-col bg-slate-50/50 hidden md:flex">
-          <div className="p-4 border-b bg-white">
+        <div className="md:col-span-4 bg-white rounded-xl border flex flex-col">
+          <div className="p-4 border-b">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <Input placeholder="Buscar chats..." className="pl-9 bg-slate-50 border-slate-200" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input placeholder="Buscar conversación..." className="pl-9 bg-slate-50" />
             </div>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {chats.map(chat => (
-              <div 
-                key={chat.id} 
-                onClick={() => setActiveChat(chat.id)}
-                className={`p-4 border-b cursor-pointer transition-colors ${activeChat === chat.id ? 'bg-blue-50/50 border-l-4 border-l-blue-600' : 'hover:bg-slate-100'}`}
-              >
-                <div className="flex justify-between items-start mb-1">
-                  <h4 className="font-semibold text-slate-900">{chat.clientName}</h4>
-                  <span className="text-xs text-slate-500">
-                    {chat.lastMessageAt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 truncate mb-1">{chat.phone}</p>
-                  <div className="flex items-center justify-between mt-1">
-                    <p className="text-sm text-slate-600 truncate">{chat.lastMessage}</p>
-                    {aiEnabled && chat.aiPaused && (
-                      <span className="shrink-0 bg-red-100 text-red-600 rounded-full p-1 ml-2" title="IA Pausada">
-                        <BotOff className="w-3 h-3" />
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-  
-          {/* Chat Area */}
-          {currentChat ? (
-            <div className="flex-1 flex flex-col bg-white">
-              {/* Header */}
-              <div className="p-4 border-b flex items-center justify-between bg-white">
-                <div>
-                  <h3 className="font-bold text-lg text-slate-900">{currentChat.clientName}</h3>
-                  <p className="text-sm text-slate-500">{currentChat.phone}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {aiEnabled && (
-                    <Button 
-                      variant={currentChat.aiPaused ? "default" : "outline"}
-                      size="sm" 
-                      onClick={() => toggleAiStatus(currentChat.id)}
-                      className={currentChat.aiPaused ? 'bg-red-600 hover:bg-red-700' : 'text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100'}
-                    >
-                      {currentChat.aiPaused ? (
-                        <><BotOff className="w-4 h-4 mr-2" /> IA Intervenida</>
-                      ) : (
-                        <><Bot className="w-4 h-4 mr-2" /> IA Respondiendo</>
-                      )}
-                    </Button>
-                  )}
-                  <Button variant="outline" size="sm" className="hidden sm:flex">
-                    <FileText className="w-4 h-4 mr-2" />
-                    Ver Lead Info
-                  </Button>
-                </div>
+            {loading ? (
+              <div className="flex items-center justify-center py-12 text-slate-500">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                Cargando conversaciones...
               </div>
+            ) : chats.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                <MessageSquare className="w-10 h-10 mb-3 text-slate-300" />
+                <p className="text-sm">No hay conversaciones aún</p>
+                <p className="text-xs text-slate-400 mt-1">Los mensajes de WhatsApp aparecerán aquí</p>
+              </div>
+            ) : (
+              chats.map(chat => (
+                <div
+                  key={chat.id}
+                  onClick={() => setActiveChat(chat.id)}
+                  className={`p-4 border-b cursor-pointer hover:bg-slate-50 transition-colors ${
+                    activeChat === chat.id ? 'bg-blue-50 border-l-2 border-l-blue-600' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-semibold text-sm text-slate-900">{chat.clientName}</span>
+                    <span className="text-xs text-slate-400">
+                      {chat.lastMessageAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
+                  {chat.unreadCount ? (
+                    <span className="inline-block mt-1 bg-blue-600 text-white text-xs rounded-full px-2 py-0.5">
+                      {chat.unreadCount}
+                    </span>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Chat Area */}
+        {activeChatData ? (
+          <div className="md:col-span-8 bg-white rounded-xl border flex flex-col">
+            {/* Chat Header */}
+            <div className="p-4 border-b flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-slate-900">{activeChatData.clientName}</h3>
+                <p className="text-xs text-slate-500">{activeChatData.phone}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {aiEnabled && (
+                  <Button
+                    variant={activeChatData.aiPaused ? "outline" : "default"}
+                    size="sm"
+                    onClick={handleToggleAi}
+                    className={
+                      activeChatData.aiPaused
+                        ? "border-amber-200 text-amber-700 hover:bg-amber-50"
+                        : "bg-blue-600 hover:bg-blue-700"
+                    }
+                  >
+                    {activeChatData.aiPaused ? (
+                      <><BotOff className="w-4 h-4 mr-2" /> IA Pausada</>
+                    ) : (
+                      <><Bot className="w-4 h-4 mr-2" /> IA Respondiendo</>
+                    )}
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" className="hidden sm:flex">
+                  <FileText className="w-4 h-4 mr-2" />
+                  Ver Lead Info
+                </Button>
+              </div>
+            </div>
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/30">
-              {currentChat.messages.map(msg => {
-                const isClient = msg.sender === 'user';
-                return (
-                  <div key={msg.id} className={`flex ${isClient ? 'justify-start' : 'justify-end'}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${isClient ? 'bg-white border text-slate-800 rounded-bl-none shadow-sm' : 'bg-blue-600 text-white rounded-br-none shadow-sm'}`}>
-                      {!isClient && msg.sender === 'ai' && (
-                         <div className="flex items-center gap-1 mb-1 text-blue-100 text-xs font-medium">
-                           <Bot className="w-3 h-3" /> Respondido por IA
-                         </div>
-                      )}
-                       <p className="text-sm leading-relaxed">{msg.text}</p>
-                       <div className={`text-[10px] mt-1 text-right ${isClient ? 'text-slate-400' : 'text-blue-200'}`}>
-                         {msg.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                       </div>
+              {activeChatData.messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-slate-400 text-sm">
+                  Sin mensajes aún
+                </div>
+              ) : (
+                activeChatData.messages.map(msg => {
+                  const isClient = msg.sender === 'user';
+                  return (
+                    <div key={msg.id} className={`flex ${isClient ? 'justify-start' : 'justify-end'}`}>
+                      <div
+                        className={`max-w-[75%] rounded-2xl px-4 py-2 ${
+                          isClient
+                            ? 'bg-white border text-slate-800 rounded-bl-none shadow-sm'
+                            : 'bg-blue-600 text-white rounded-br-none shadow-sm'
+                        }`}
+                      >
+                        {!isClient && msg.sender === 'ai' && (
+                          <div className="flex items-center gap-1 mb-1 text-blue-100 text-xs font-medium">
+                            <Bot className="w-3 h-3" /> Respondido por IA
+                          </div>
+                        )}
+                        <p className="text-sm leading-relaxed">{msg.text}</p>
+                        <div
+                          className={`text-[10px] mt-1 text-right ${
+                            isClient ? 'text-slate-400' : 'text-blue-200'
+                          }`}
+                        >
+                          {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
               <div ref={messagesEndRef} />
             </div>
 
@@ -243,7 +332,7 @@ export function Inbox() {
               {templates.length > 0 && (
                 <div className="flex gap-2 overflow-x-auto pb-3 mb-2 scrollbar-none">
                   {templates.map(t => (
-                    <button 
+                    <button
                       key={t.id}
                       onClick={() => handleSendTemplate(t.content)}
                       className="whitespace-nowrap px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-full transition-colors flex items-center gap-1"
@@ -255,19 +344,19 @@ export function Inbox() {
                 </div>
               )}
               <div className="flex items-end gap-2">
-                <Textarea 
+                <Textarea
                   value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  placeholder="Escribe un mensaje para responder manualmente o intervenir..."
+                  onChange={e => setMessageText(e.target.value)}
+                  placeholder="Escribe un mensaje para responder manualmente..."
                   className="min-h-[60px] resize-none pb-2 text-sm max-h-[120px]"
-                  onKeyDown={(e) => {
+                  onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       handleSendMessage();
                     }
                   }}
                 />
-                <Button 
+                <Button
                   onClick={handleSendMessage}
                   disabled={!messageText.trim()}
                   className="bg-blue-600 hover:bg-blue-700 h-[60px] w-[60px] rounded-xl shrink-0"
@@ -278,9 +367,11 @@ export function Inbox() {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-500 bg-slate-50/50">
-            <MessageSquare className="w-12 h-12 mb-4 text-slate-300" />
-            <p>Selecciona una conversación para comenzar</p>
+          <div className="md:col-span-8 bg-white rounded-xl border flex items-center justify-center text-slate-500">
+            <div className="text-center">
+              <MessageSquare className="w-12 h-12 mb-4 text-slate-300 mx-auto" />
+              <p>Selecciona una conversación para comenzar</p>
+            </div>
           </div>
         )}
       </div>
