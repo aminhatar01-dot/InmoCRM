@@ -162,8 +162,8 @@ export function Dashboard() {
                   <RechartsTooltip cursor={{fill: 'transparent'}} />
                   <Bar dataKey="leads" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                 </BarChart>
-              )}
               </ResponsiveContainer>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -197,8 +197,8 @@ export function Dashboard() {
                   <RechartsTooltip />
                   <Legend verticalAlign="bottom" height={36} />
                 </PieChart>
-              )}
               </ResponsiveContainer>
+              )}
             </div>
           </CardContent>
         </Card>
